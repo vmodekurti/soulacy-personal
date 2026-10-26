@@ -271,6 +271,10 @@ type LLMConfig struct {
 	ReasoningEffort  string  `yaml:"reasoning_effort,omitempty"  json:"reasoning_effort,omitempty"`
 	PresencePenalty  float64 `yaml:"presence_penalty,omitempty"  json:"presence_penalty,omitempty"`
 	FrequencyPenalty float64 `yaml:"frequency_penalty,omitempty" json:"frequency_penalty,omitempty"`
+	// Routing selects how the gateway chooses models for this agent. Empty uses
+	// the workspace default; "auto", "fast", and "strong" enable routing while
+	// "pinned" always uses Provider/Model exactly as configured.
+	Routing string `yaml:"routing,omitempty" json:"routing,omitempty"`
 
 	// OutputSchema, when set, constrains the final reply to valid JSON matching
 	// the supplied JSON Schema. Translated per provider:

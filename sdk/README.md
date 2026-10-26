@@ -20,6 +20,7 @@ on the SDK, never on `internal/` packages.
 | `sdk/storage` | `storage.ActionLogBackend`, `storage.MemoryBackend` |
 | `sdk/registry` | Named factory registries — drivers self-register from `init()` |
 | `sdk/reasoning` | `reasoning.Strategy` — pluggable reasoning loops (E15) |
+| `sdk/hooks` | Ordered in-process lifecycle hooks for runs, context, model calls, and tools |
 | `sdk/extchannel` | External Channel Protocol v1 wire types (NDJSON frames) |
 | `sdk/extchannel/sidecartest` | Sidecar protocol conformance runner (E11) |
 | `sdk/extstorage` | External Storage Protocol v1 — JSON-RPC over stdio for vector/queue sidecars (E24) |
@@ -65,3 +66,27 @@ Exported test suites for extension authors (`channeltest.RunAdapterSuite`,
 `providertest.RunProviderSuite`, sidecar conformance) arrive with Story E11.
 Until then, see `internal/channels/external/conformance.go` for the sidecar
 suite shape.
+
+## Lifecycle hooks
+
+Use `sdk/hooks` for trusted, compiled-in extensions that need a stable runtime
+boundary. A hook receives bounded metadata and can deny `run.before`,
+`llm.before`, or `tool.before`. After stages are observational. The host still
+applies its policy engine, allowlists, confirmation gates, sandbox, provider
+accounting, and routing after a hook allows an operation.
+
+```go
+registry := &hooks.Registry{}
+err := registry.Register("tenant-policy", hooks.HandlerFunc(
+    func(ctx context.Context, event hooks.Event) (hooks.Decision, error) {
+        if event.Stage == hooks.ToolBefore && event.Data["tool"] == "shell_exec" {
+            return hooks.Decision{Deny: true, Reason: "shell is disabled here"}, nil
+        }
+        return hooks.Decision{}, nil
+    }), hooks.ToolBefore)
+engine.SetLifecycleHooks(registry)
+```
+
+Registration order is execution order. Duplicate names are rejected so startup
+configuration is deterministic. Every invocation emits a `lifecycle.<stage>`
+event to the normal durable run ledger.

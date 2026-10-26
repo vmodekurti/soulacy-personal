@@ -89,6 +89,27 @@ var (
 		},
 		[]string{"provider", "model"},
 	)
+	LLMRouteDecisionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "soulacy_llm_route_decisions_total",
+			Help: "Model-routing attempts by task class, selected provider/model, and outcome.",
+		},
+		[]string{"task_class", "provider", "model", "outcome"},
+	)
+	LLMRouteFallbacksTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "soulacy_llm_route_fallbacks_total",
+			Help: "Cross-provider/model fallbacks by source, destination, and failure category.",
+		},
+		[]string{"from_provider", "to_provider", "reason"},
+	)
+	LLMRouteCircuitOpensTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "soulacy_llm_route_circuit_opens_total",
+			Help: "Provider/model routing circuits opened after consecutive failures.",
+		},
+		[]string{"provider", "model"},
+	)
 
 	// Tool calls (Python tools, MCP tools, agent peer calls, built-ins)
 
@@ -231,6 +252,7 @@ func init() {
 	Registry.MustRegister(
 		HTTPRequestDuration, HTTPRequestsTotal,
 		LLMCallDuration, LLMCallsTotal, LLMInputTokens, LLMOutputTokens,
+		LLMRouteDecisionsTotal, LLMRouteFallbacksTotal, LLMRouteCircuitOpensTotal,
 		ToolCallDuration, ToolCallsTotal,
 		AgentRunDuration, AgentRunsTotal, AgentPanicsTotal, AgentBudgetHaltsTotal,
 		ActionlogQueueDepth, ActionlogBatchSize, ActionlogDropsTotal,

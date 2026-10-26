@@ -141,9 +141,9 @@
     max-height: 88vh;
     overflow-y: auto;
     padding: 1.5rem;
-    border: 1px solid var(--sl-line, #2a2f4a);
+    border: 1px solid var(--sl-line, var(--sl-line));
     border-radius: 14px;
-    background: var(--sl-surface, #14172a);
+    background: var(--sl-surface, var(--sl-surface-muted));
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
   }
 
@@ -156,7 +156,7 @@
 
   .eyebrow {
     margin-bottom: 0.3rem;
-    color: var(--sl-accent, #8d95ff);
+    color: var(--sl-accent, var(--sl-accent-ink));
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -164,13 +164,13 @@
   }
 
   h2 { margin: 0; font-size: 1.2rem; }
-  p { color: var(--sl-text-dim, #a4a9c6); line-height: 1.55; }
+  p { color: var(--sl-text-dim, var(--sl-text-dim)); line-height: 1.55; }
 
   .close-button {
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--sl-text-dim, #a4a9c6);
+    color: var(--sl-text-dim, var(--sl-text-dim));
     font-size: 1.6rem;
     line-height: 1;
   }
@@ -180,13 +180,13 @@
     gap: 0.4rem;
     margin: 1rem 0;
     padding: 0.8rem 0.9rem;
-    border: 1px solid var(--sl-line, #2a2f4a);
+    border: 1px solid var(--sl-line, var(--sl-line));
     border-radius: 9px;
     background: rgba(7, 9, 20, 0.55);
   }
 
-  .target-image span { color: var(--sl-text-faint, #7b82a8); font-size: 0.72rem; text-transform: uppercase; }
-  .target-image code { overflow-wrap: anywhere; color: var(--sl-text, #e8eaf6); }
+  .target-image span { color: var(--sl-text-faint, var(--sl-text-faint)); font-size: 0.72rem; text-transform: uppercase; }
+  .target-image code { overflow-wrap: anywhere; color: var(--sl-text, var(--sl-text)); }
 
   .version-move {
     display: flex;
@@ -197,22 +197,22 @@
     padding: 0.45rem 0.7rem;
     border-radius: 999px;
     background: var(--sl-accent-soft, color-mix(in srgb, var(--sl-accent-hover) 12%, transparent));
-    color: var(--sl-text-dim, #a4a9c6);
+    color: var(--sl-text-dim, var(--sl-text-dim));
     font-size: 0.82rem;
   }
 
-  .version-move strong { color: var(--sl-text, #e8eaf6); }
+  .version-move strong { color: var(--sl-text, var(--sl-text)); }
 
   ol {
     display: grid;
     gap: 0.75rem;
     margin: 1.1rem 0 1.35rem;
     padding-left: 1.3rem;
-    color: var(--sl-text, #e8eaf6);
+    color: var(--sl-text, var(--sl-text));
     line-height: 1.5;
   }
 
-  li::marker { color: var(--sl-accent, #8d95ff); font-weight: 700; }
+  li::marker { color: var(--sl-accent, var(--sl-accent-ink)); font-weight: 700; }
 
   .upgrade-modal-actions {
     display: flex;

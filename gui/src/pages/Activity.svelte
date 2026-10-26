@@ -37,7 +37,11 @@
   let runningSessions = []
   let hungCount = 0
   let runningPollTimer = null
+  let activityFocused = false
+  let showAdvancedFilters = false
   const ALL_AGENTS = '__all__'
+  const PRIMARY_FILTERS = ['all', 'run', 'errors']
+  const ADVANCED_FILTERS = ['llm', 'tools', 'decisions', 'security', 'flow']
 
   function hashParams() {
     const hash = window.location.hash || ''
@@ -192,11 +196,22 @@
     // when the user isn't watching a specific agent.
     pollRunning()
     runningPollTimer = setInterval(pollRunning, 3000)
+    window.addEventListener('keydown', handleActivityKeydown)
   })
   onDestroy(() => {
     if (timer) clearInterval(timer)
     if (runningPollTimer) clearInterval(runningPollTimer)
+    window.removeEventListener('keydown', handleActivityKeydown)
   })
+
+  function handleActivityKeydown(event) {
+    if (event.key === 'Escape' && activityFocused) activityFocused = false
+  }
+
+  function toggleActivityFocus() {
+    activityFocused = !activityFocused
+    if (activityFocused) setTimeout(() => logEl?.focus(), 0)
+  }
 
   async function pollRunning() {
     try {
@@ -230,6 +245,21 @@
     'message.in':  { label: 'RUN',    color: 'var(--sl-accent)', icon: '▶' },
     'llm.call':    { label: 'LLM',    color: 'var(--sl-accent-hover)', icon: '↗' },
     'llm.result':  { label: 'LLM',    color: 'var(--sl-accent-hover)', icon: '↙' },
+    'llm.prompt':  { label: 'PROMPT', color: '#8b93bd', icon: '▧' },
+    'llm.completion': { label: 'LLM', color: 'var(--sl-accent-hover)', icon: '◈' },
+    'llm.response.content': { label: 'OUTPUT', color: '#8b93bd', icon: '▤' },
+    'llm.route.decision':  { label: 'ROUTE', color: '#8bdcff', icon: '◇' },
+    'llm.route.fallback':  { label: 'ROUTE', color: '#f0a060', icon: '⇢' },
+    'llm.route.completed': { label: 'ROUTE', color: '#4caf82', icon: '◆' },
+    'context.prepared':  { label: 'CONTEXT', color: '#9ba7ff', icon: '▧' },
+    'context.compacted': { label: 'CONTEXT', color: '#f0a060', icon: '▨' },
+    'lifecycle.run.before': { label: 'HOOK', color: '#c084fc', icon: '◌' },
+    'lifecycle.run.after': { label: 'HOOK', color: '#c084fc', icon: '●' },
+    'lifecycle.context.after': { label: 'HOOK', color: '#c084fc', icon: '◌' },
+    'lifecycle.llm.before': { label: 'HOOK', color: '#c084fc', icon: '◌' },
+    'lifecycle.llm.after': { label: 'HOOK', color: '#c084fc', icon: '●' },
+    'lifecycle.tool.before': { label: 'HOOK', color: '#c084fc', icon: '◌' },
+    'lifecycle.tool.after': { label: 'HOOK', color: '#c084fc', icon: '●' },
     'tool.call':   { label: 'TOOL',   color: '#f0a060', icon: '🔧' },
     'tool.result': { label: 'TOOL',   color: '#f0a060', icon: '↩' },
     'reasoning.start':  { label: 'LOOP', color: '#5bc0de', icon: '▶' },
@@ -306,6 +336,15 @@
 
   function canExpandFlow(ev) {
     return !!flowPayload(ev)
+  }
+
+  function isDecisionEvent(ev) {
+    const type = ev?.type || ''
+    return type.startsWith('context.') || type.startsWith('llm.route.') || type.startsWith('lifecycle.')
+  }
+
+  function decisionDetail(ev) {
+    try { return JSON.stringify(ev?.payload || {}, null, 2) } catch (_) { return String(ev?.payload || '') }
   }
 
   function normalizeRunHistory(rows) {
@@ -436,6 +475,31 @@
       }
       case 'llm.call':    return `LLM call → ${p.model || '?'} · turn ${p.turn ?? '?'}`
       case 'llm.result':  return `LLM result — ${p.output_tokens ?? 0} out / ${p.input_tokens ?? 0} in tokens · ${p.duration_ms ?? 0}ms${p.tool_calls ? ` · ${p.tool_calls} tool call(s)` : ''}`
+      case 'llm.prompt': return `Prompt ${String(p.prompt_sha256 || '').slice(0, 12)} · ${p.message_count ?? 0} message(s) · about ${p.estimated_input_tokens ?? 0} tokens${p.content_captured ? ' · content captured' : ''}`
+      case 'llm.completion': return `${p.outcome || 'completed'} · ${p.provider || p.requested_provider || '?'} / ${p.model || p.requested_model || '?'} · ${p.duration_ms ?? 0}ms`
+      case 'llm.response.content': return `Streamed response ${String(p.response_sha256 || '').slice(0, 12)} · ${p.response_chars ?? 0} characters${p.content_captured ? ' · content captured' : ''}`
+      case 'llm.route.decision': return `Route ${p.task_class || 'standard'} work across ${(p.candidates || []).length} candidate(s)`
+      case 'llm.route.fallback': {
+        const last = (p.attempts || []).at(-1) || {}
+        return `${p.fallback_from || last.provider || 'provider'} failed (${p.fallback_reason || last.error_category || 'provider error'}); trying ${p.fallback_to || 'the next compatible model'}`
+      }
+      case 'llm.route.completed': return p.selected_provider
+        ? `Selected ${p.selected_provider} / ${p.selected_model || 'default'}${p.fallbacks ? ` after ${p.fallbacks} fallback(s)` : ''}`
+        : `No compatible route completed${p.attempts?.length ? ` after ${p.attempts.length} attempt(s)` : ''}`
+      case 'context.prepared':
+      case 'context.compacted': {
+        const action = ev.type === 'context.compacted' ? `compacted ${p.dropped_messages || 0} old message(s)` : 'prepared'
+        const sources = Object.entries(p.sources || {}).filter(([, enabled]) => enabled).map(([name]) => name.replaceAll('_', ' ')).join(', ')
+        return `Context ${action} · about ${p.estimated_tokens_after ?? 0} / ${p.input_budget_tokens ?? '?'} tokens · ${sources || 'system prompt'}`
+      }
+      case 'lifecycle.run.before':
+      case 'lifecycle.run.after':
+      case 'lifecycle.context.after':
+      case 'lifecycle.llm.before':
+      case 'lifecycle.llm.after':
+      case 'lifecycle.tool.before':
+      case 'lifecycle.tool.after':
+        return `${p.stage || ev.type.replace('lifecycle.', '')}${p.denied ? ` denied — ${p.reason || 'blocked by hook'}` : ' completed'}`
       case 'tool.call':   return `${p.name || 'tool'}(${snippet(JSON.stringify(p.arguments || {}), 80)})`
       case 'tool.result': {
         const tr = toolResultPayload(p)
@@ -497,6 +561,7 @@
     // while the securityOnly toggle offers cross-type filtering.
     security: (t, ev) => t === 'injection.finding' || t === 'intent.decision' || hasSecuritySignal(ev),
     flow:     (t) => t.startsWith('flow.'),
+    decisions: (t) => t.startsWith('context.') || t.startsWith('llm.route.') || t.startsWith('lifecycle.'),
   }
   $: filtered = events.filter(ev =>
     (FILTERS[typeFilter] || FILTERS.all)(ev.type || '', ev) &&
@@ -506,7 +571,7 @@
   )
 </script>
 
-<div class="page">
+<div class="page" class:activity-focused={activityFocused}>
   <div class="page-header">
     <h1>Runs</h1>
     <div class="header-actions">
@@ -531,21 +596,7 @@
         <option value={a.id}>{a.name || a.id}</option>
       {/each}
     </select>
-
-    <div class="chips">
-      {#each Object.keys(FILTERS) as f}
-        <button class="chip" class:on={typeFilter === f} on:click={() => typeFilter = f}>{f}</button>
-      {/each}
-    </div>
-
-    <!-- F-GUI-1 — cross-cutting filter that leaves the type tabs alone but
-         hides everything without an injection/intent security signal. -->
-    <label class="sec-toggle" title="Hide events without an injection or intent-decision signal">
-      <input type="checkbox" bind:checked={securityOnly} />
-      Security findings only
-    </label>
-
-    <label class="autoscroll"><input type="checkbox" bind:checked={autoScroll} /> auto-scroll</label>
+    <span class="toolbar-hint">Choose an agent, then select a run to inspect its activity.</span>
   </div>
 
   {#if sessionFilter}
@@ -594,11 +645,16 @@
   {#if runHistory.length > 0}
     <div class="run-strip" aria-label="Canonical run history">
       <div class="run-strip-head">
-        <span class="source-label">Unified runs</span>
-        <span class="source-count">{runHistory.length} from durable ledger</span>
-        {#if runFilter}
-          <button class="row-action" on:click={clearRunFilter}>Show all events</button>
-        {/if}
+        <div class="run-strip-title">
+          <span class="source-label">Runs</span>
+          <span class="source-count">{runHistory.length} saved</span>
+        </div>
+        <div class="run-strip-actions">
+          {#if runFilter}
+            <button class="row-action" on:click={clearRunFilter}>Clear selection</button>
+          {/if}
+          <button class="row-action" on:click={toggleActivityFocus}>Expand activity</button>
+        </div>
       </div>
       <div class="run-cards">
         {#each runHistory.slice(0, 18) as run (run.id)}
@@ -638,21 +694,62 @@
     <RunFailure failure={runFilter.failure} error={runFilter.status === 'failed' ? runFilter.error : ''} />
   {/if}
 
-  {#if path}
-    <div class="source-bar">
-      <span class="source-label">Log file</span>
-      <code class="source-path">{path}</code>
-      <span class="source-count">{filtered.length} / {events.length} events</span>
+  <section class="activity-section" aria-label="Run activity">
+    <div class="activity-head">
+      <div class="activity-heading">
+        <h2>Activity</h2>
+        <span>{filtered.length} event{filtered.length === 1 ? '' : 's'}{runFilter ? ' in selected run' : ''}</span>
+      </div>
+      <div class="activity-actions">
+        <label class="autoscroll"><input type="checkbox" bind:checked={autoScroll} /> Follow new events</label>
+        <button class="focus-btn" class:on={activityFocused} on:click={toggleActivityFocus} aria-pressed={activityFocused}>
+          {activityFocused ? '↙ Exit focus' : '↗ Expand activity'}
+        </button>
+      </div>
     </div>
-  {:else if selectedId === ALL_AGENTS}
-    <div class="source-bar">
-      <span class="source-label">Durable history</span>
-      <code class="source-path">All agents from the SQLite action log</code>
-      <span class="source-count">{filtered.length} / {events.length} events</span>
-    </div>
-  {/if}
 
-  <div class="log-panel" bind:this={logEl}>
+    <div class="activity-filters" aria-label="Activity filters">
+      <div class="chips primary-chips">
+        {#each PRIMARY_FILTERS as f}
+          <button class="chip" class:on={typeFilter === f} on:click={() => typeFilter = f}>{f}</button>
+        {/each}
+      </div>
+      <button class="more-filters" class:on={showAdvancedFilters} on:click={() => showAdvancedFilters = !showAdvancedFilters} aria-expanded={showAdvancedFilters}>
+        {showAdvancedFilters ? 'Fewer filters' : 'More filters'}
+      </button>
+      {#if typeFilter !== 'all'}
+        <span class="filter-summary">Showing {typeFilter}</span>
+      {/if}
+    </div>
+
+    {#if showAdvancedFilters}
+      <div class="advanced-filters">
+        <div class="chips">
+          {#each ADVANCED_FILTERS as f}
+            <button class="chip" class:on={typeFilter === f} on:click={() => typeFilter = f}>{f}</button>
+          {/each}
+        </div>
+        <!-- F-GUI-1 — cross-cutting filter that leaves the type tabs alone but
+             hides everything without an injection/intent security signal. -->
+        <label class="sec-toggle" title="Hide events without an injection or intent-decision signal">
+          <input type="checkbox" bind:checked={securityOnly} />
+          Security findings only
+        </label>
+      </div>
+    {/if}
+
+    {#if path || selectedId === ALL_AGENTS}
+      <details class="technical-source">
+        <summary>Technical source</summary>
+        <div>
+          <span class="source-label">{path ? 'Log file' : 'Durable history'}</span>
+          <code class="source-path">{path || 'All agents from the SQLite action log'}</code>
+          <span class="source-count">{filtered.length} / {events.length} events</span>
+        </div>
+      </details>
+    {/if}
+
+    <div class="log-panel" bind:this={logEl} tabindex="-1">
     {#if loading && events.length === 0}
       <div class="empty">Loading…</div>
     {:else if filtered.length === 0}
@@ -705,6 +802,11 @@
           {#if canExpandFlow(ev)}
             <button class="row-action flow-detail-btn" on:click={() => toggleExpanded(rk)}>
               {expanded ? 'Hide details' : 'Details'}
+            </button>
+          {/if}
+          {#if isDecisionEvent(ev)}
+            <button class="row-action flow-detail-btn" on:click={() => toggleExpanded(rk)}>
+              {expanded ? 'Hide decision' : 'Decision details'}
             </button>
           {/if}
           {#if isBrowserEvent(ev)}
@@ -760,6 +862,13 @@
             <pre class="flow-body">{flowDetail(ev)}</pre>
           </div>
         {/if}
+        {#if expanded && isDecisionEvent(ev)}
+          <div class="row flow-detail">
+            <span class="t"></span>
+            <span class="badge flow-sum">Σ trace</span>
+            <pre class="flow-body">{decisionDetail(ev)}</pre>
+          </div>
+        {/if}
         {#if (ev.type === 'message.out' || ev.type === 'error') && ev.session_id}
           <div class="row metrics-row">
             <span class="t"></span>
@@ -769,74 +878,77 @@
         {/if}
       {/each}
     {/if}
-  </div>
+    </div>
+  </section>
 </div>
 
 <style>
-  .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; height: 100%; min-height: 0; }
+  .page        { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; height: 100%; min-height: 0; overflow-y: auto; }
   .page-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .page-header h1 { font-size: 1.2rem; font-weight: 600; }
   .header-actions { display: flex; gap: .5rem; }
   .active { background: color-mix(in srgb, var(--sl-accent) 15%, transparent) !important; color: var(--sl-accent-hover) !important; border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent) !important; }
   .banner { padding: .65rem 1rem; border-radius: 8px; font-size: .82rem; flex-shrink: 0; }
-  .err  { background: rgba(240,96,96,.1); border: 1px solid rgba(240,96,96,.3); color: #f06060; }
-  .ok   { background: rgba(76,175,130,.12); border: 1px solid rgba(76,175,130,.35); color: #4caf82; }
+  .err  { background: color-mix(in srgb, var(--sl-danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--sl-danger) 30%, transparent); color: var(--sl-danger); }
+  .ok   { background: color-mix(in srgb, var(--sl-success) 12%, transparent); border: 1px solid color-mix(in srgb, var(--sl-success) 35%, transparent); color: var(--sl-success); }
 
   .toolbar { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
   .agent-select { width: 240px; flex-shrink: 0; }
+  .toolbar-hint { color: var(--sl-text-faint); font-size: .78rem; }
   .chips { display: flex; gap: .35rem; flex-wrap: wrap; }
   .chip {
-    background: #1c1f35; border: 1px solid #2a2f4a; color: #7b82a8;
+    background: var(--sl-surface-muted); border: 1px solid var(--sl-line); color: var(--sl-text-faint);
     padding: .3rem .7rem; border-radius: 999px; font-size: .75rem; text-transform: capitalize;
   }
   .chip.on { background: color-mix(in srgb, var(--sl-accent) 15%, transparent); color: var(--sl-accent-hover); border-color: color-mix(in srgb, var(--sl-accent) 40%, transparent); }
-  .autoscroll { display: flex; align-items: center; gap: .35rem; font-size: .78rem; color: #7b82a8; margin-left: auto; }
+  .autoscroll { display: flex; align-items: center; gap: .35rem; font-size: .75rem; color: var(--sl-text-faint); white-space: nowrap; }
   .autoscroll input { width: auto; }
 
   .source-bar {
     display: flex; align-items: center; gap: .75rem;
-    padding: .5rem .85rem; background: #0e1020; border: 1px solid var(--sl-line);
+    padding: .5rem .85rem; background: var(--sl-surface-inset); border: 1px solid var(--sl-line);
     border-radius: 8px; flex-shrink: 0;
   }
-  .source-label { font-size: .7rem; color: #555a7a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-  .source-path  { font-size: .78rem; color: #7b82a8; flex: 1; word-break: break-all; }
-  .source-count { font-size: .72rem; color: #555a7a; flex-shrink: 0; }
+  .source-label { font-size: .7rem; color: var(--sl-text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .source-path  { font-size: .78rem; color: var(--sl-text-faint); flex: 1; word-break: break-all; }
+  .source-count { font-size: .72rem; color: var(--sl-text-faint); flex-shrink: 0; }
 
   .run-strip {
-    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 10px;
-    padding: .65rem; display: flex; flex-direction: column; gap: .55rem; flex-shrink: 0;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
+    padding: .85rem; display: flex; flex-direction: column; gap: .7rem; flex-shrink: 0;
   }
-  .run-strip-head { display: flex; align-items: center; gap: .7rem; }
+  .run-strip-head { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
+  .run-strip-title, .run-strip-actions { display: flex; align-items: center; gap: .65rem; }
   .run-cards {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: .45rem; max-height: 190px; overflow: auto;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: .65rem; max-height: 310px; overflow: auto;
   }
   .run-card {
-    text-align: left; border: 1px solid #242a47; background: #12162a; color: #c8cadf;
-    border-radius: 8px; padding: .55rem .65rem; display: grid;
-    grid-template-columns: 1fr auto; gap: .18rem .5rem; min-height: 74px;
+    text-align: left; border: 1px solid #242a47; background: var(--sl-surface-muted); color: var(--sl-text);
+    border-radius: 9px; padding: .7rem .8rem; display: grid;
+    grid-template-columns: 1fr auto; gap: .28rem .6rem; min-height: 92px;
   }
   .run-card:hover, .run-card.on { border-color: color-mix(in srgb, var(--sl-accent) 65%, transparent); background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
-  .run-card.failed { border-left: 3px solid #f06060; }
-  .run-card.success { border-left: 3px solid #4caf82; }
+  .run-card.failed { border-left: 3px solid var(--sl-danger); }
+  .run-card.success { border-left: 3px solid var(--sl-success); }
   .run-status { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--sl-accent-hover); font-weight: 700; }
   .run-time { font-size: .66rem; color: var(--sl-text-faint); justify-self: end; }
   .run-trigger, .run-preview, .run-delivery, .run-browser { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .run-trigger { color: #e7e8f5; font-size: .76rem; }
-  .run-preview, .run-delivery { color: #7b82a8; font-size: .68rem; }
-  .run-browser { color: #8bdcff; font-size: .68rem; }
+  .run-trigger { color: var(--sl-text); font-size: .76rem; }
+  .run-preview, .run-delivery { color: var(--sl-text-faint); font-size: .7rem; }
+  .run-browser { color: var(--sl-info); font-size: .68rem; }
 
   /* E4c — Running now strip: live snapshot of in-flight sessions with hung callouts. */
   .running-strip {
-    background: #0e1020; border: 1px solid var(--sl-line); border-radius: 10px;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
     padding: .65rem; display: flex; flex-direction: column; gap: .55rem; flex-shrink: 0;
   }
-  .running-strip.has-hung { border-color: rgba(240,96,96,.4); }
+  .running-strip.has-hung { border-color: color-mix(in srgb, var(--sl-danger) 40%, transparent); }
   .running-head { display: flex; align-items: center; gap: .7rem; }
   .hung-pill {
     display: inline-block; margin-left: .5rem;
     padding: .05rem .35rem; border-radius: 3px;
-    background: rgba(240,96,96,.15); color: #f06060;
+    background: color-mix(in srgb, var(--sl-danger) 15%, transparent); color: var(--sl-danger);
     font-size: .68rem; font-weight: 700;
   }
   .running-cards {
@@ -844,55 +956,94 @@
     gap: .45rem; max-height: 240px; overflow: auto;
   }
   .running-card {
-    text-align: left; border: 1px solid #242a47; background: #12162a; color: #c8cadf;
+    text-align: left; border: 1px solid #242a47; background: var(--sl-surface-muted); color: var(--sl-text);
     border-radius: 8px; padding: .55rem .65rem;
     display: flex; flex-direction: column; gap: .2rem; cursor: pointer;
   }
   .running-card:hover { border-color: color-mix(in srgb, var(--sl-accent) 65%, transparent); background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
   .running-card.hung {
-    border-color: rgba(240,96,96,.55); background: rgba(240,96,96,.06);
-    border-left: 3px solid #f06060;
+    border-color: color-mix(in srgb, var(--sl-danger) 55%, transparent); background: color-mix(in srgb, var(--sl-danger) 6%, transparent);
+    border-left: 3px solid var(--sl-danger);
   }
   .rc-head { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
-  .rc-agent { color: #e7e8f5; font-weight: 600; font-size: .78rem; }
+  .rc-agent { color: var(--sl-text); font-weight: 600; font-size: .78rem; }
   .rc-timers { color: var(--sl-text-faint); font-size: .66rem; }
   .rc-last { color: var(--sl-accent-hover); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
-  .rc-reason { color: #f06060; font-size: .72rem; margin-top: .2rem; }
+  .rc-reason { color: var(--sl-danger); font-size: .72rem; margin-top: .2rem; }
   .rc-fix    { color: #c8c7ff; font-size: .68rem; }
 
+  .activity-section {
+    flex: 1; min-height: min(440px, 55vh); display: flex; flex-direction: column; gap: .6rem;
+    padding: .85rem; background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
+  }
+  .activity-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-shrink: 0; }
+  .activity-heading { display: flex; align-items: baseline; gap: .65rem; }
+  .activity-heading h2 { margin: 0; font-size: .95rem; color: var(--sl-text); }
+  .activity-heading span { color: var(--sl-text-faint); font-size: .72rem; }
+  .activity-actions { display: flex; align-items: center; gap: .65rem; }
+  .focus-btn, .more-filters {
+    background: #171b30; border: 1px solid var(--sl-line); color: #aeb4d0;
+    border-radius: 7px; padding: .36rem .65rem; font-size: .72rem;
+  }
+  .focus-btn:hover, .focus-btn.on, .more-filters:hover, .more-filters.on {
+    color: var(--sl-accent-hover); border-color: color-mix(in srgb, var(--sl-accent) 45%, transparent);
+    background: color-mix(in srgb, var(--sl-accent) 12%, transparent);
+  }
+  .activity-filters { display: flex; align-items: center; gap: .55rem; flex-shrink: 0; }
+  .filter-summary { color: var(--sl-text-faint); font-size: .7rem; }
+  .advanced-filters {
+    display: flex; align-items: center; gap: .65rem; padding: .55rem .65rem;
+    background: var(--sl-surface-muted); border: 1px solid #242a47; border-radius: 8px; flex-shrink: 0;
+  }
+  .technical-source { flex-shrink: 0; color: var(--sl-text-faint); font-size: .72rem; }
+  .technical-source summary { cursor: pointer; width: fit-content; }
+  .technical-source > div {
+    display: flex; align-items: center; gap: .65rem; margin-top: .45rem; padding: .45rem .6rem;
+    background: var(--sl-surface-inset); border-radius: 7px;
+  }
   .log-panel {
-    flex: 1; min-height: 0; overflow-y: auto;
-    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 10px;
+    flex: 1; min-height: 320px; overflow-y: auto;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 10px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: .76rem; line-height: 1.5;
   }
-  .empty { padding: 3rem 2rem; text-align: center; color: #555a7a; line-height: 1.7; }
+  .log-panel:focus { outline: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent); outline-offset: 1px; }
+
+  .page.activity-focused { overflow: hidden; }
+  .activity-focused > .page-header,
+  .activity-focused > .toolbar,
+  .activity-focused > .running-strip,
+  .activity-focused > .run-strip,
+  .activity-focused > .banner { display: none; }
+  .activity-focused .activity-section { min-height: 0; height: 100%; }
+  .activity-focused .log-panel { min-height: 0; }
+  .empty { padding: 3rem 2rem; text-align: center; color: var(--sl-text-faint); line-height: 1.7; }
 
   .row {
     display: grid; grid-template-columns: 76px 86px minmax(0, 1fr) repeat(5, auto); gap: .6rem; align-items: start;
     padding: .3rem .85rem; border-bottom: 1px solid rgba(255,255,255,.03);
   }
   .row:hover { background: rgba(255,255,255,.03); }
-  .row.is-error { background: rgba(240,96,96,.06); }
+  .row.is-error { background: color-mix(in srgb, var(--sl-danger) 6%, transparent); }
   .row.is-recovery { background: rgba(245,167,66,.055); }
   .row.is-degraded { background: rgba(245,167,66,.075); }
-  .t     { color: #555a7a; }
+  .t     { color: var(--sl-text-faint); }
   .badge { font-weight: 700; font-size: .68rem; white-space: nowrap; }
-  .sum   { color: #c8cadf; white-space: pre-wrap; word-break: break-word; }
+  .sum   { color: var(--sl-text); white-space: pre-wrap; word-break: break-word; }
   .row-action {
     justify-self: end; align-self: center;
     background: color-mix(in srgb, var(--sl-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 35%, transparent);
-    color: #ada8ff; border-radius: 6px; padding: .18rem .48rem;
+    color: var(--sl-accent-ink); border-radius: 6px; padding: .18rem .48rem;
     font-family: inherit; font-size: .68rem;
   }
-  .row-action.debug { background: rgba(76,175,130,.10); border-color: rgba(76,175,130,.35); color: #76d6a0; }
-  .row-action.browser { background: rgba(64,196,255,.10); border-color: rgba(64,196,255,.35); color: #8bdcff; }
-  .row-action.learn { background: rgba(245,167,66,.10); border-color: rgba(245,167,66,.35); color: #f5bd67; }
-  .row-action.flow-detail-btn { background: rgba(64,196,255,.10); border-color: rgba(64,196,255,.32); color: #8bdcff; }
+  .row-action.debug { background: color-mix(in srgb, var(--sl-success) 10%, transparent); border-color: color-mix(in srgb, var(--sl-success) 35%, transparent); color: #76d6a0; }
+  .row-action.browser { background: rgba(64,196,255,.10); border-color: rgba(64,196,255,.35); color: var(--sl-info); }
+  .row-action.learn { background: rgba(245,167,66,.10); border-color: rgba(245,167,66,.35); color: var(--sl-warning); }
+  .row-action.flow-detail-btn { background: rgba(64,196,255,.10); border-color: rgba(64,196,255,.32); color: var(--sl-info); }
   .row-action:disabled { opacity: .55; cursor: wait; }
   .agent-pill {
     justify-self: end; align-self: center; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; border: 1px solid color-mix(in srgb, var(--sl-accent) 28%, transparent); background: color-mix(in srgb, var(--sl-accent) 10%, transparent);
-    color: #ada8ff; border-radius: 999px; padding: .14rem .45rem; font-size: .66rem;
+    color: var(--sl-accent-ink); border-radius: 999px; padding: .14rem .45rem; font-size: .66rem;
   }
 
   .metrics-row { opacity: .85; }
@@ -902,9 +1053,9 @@
      scheme used in Dashboard: info=blue, warn=amber, danger=red. */
   .sec-toggle {
     display: flex; align-items: center; gap: .35rem;
-    font-size: .72rem; color: #7b82a8;
+    font-size: .72rem; color: var(--sl-text-faint);
     padding: .3rem .6rem;
-    background: #12162a; border: 1px solid #242a47; border-radius: 999px;
+    background: var(--sl-surface-muted); border: 1px solid #242a47; border-radius: 999px;
     cursor: pointer;
   }
   .sec-toggle input { width: auto; margin: 0; }
@@ -912,44 +1063,44 @@
     justify-self: end; align-self: center;
     font-size: .65rem; font-family: inherit; font-weight: 700;
     border-radius: 999px; padding: .14rem .5rem; white-space: nowrap;
-    background: rgba(139,220,255,.12); border: 1px solid rgba(139,220,255,.35); color: #8bdcff;
+    background: color-mix(in srgb, var(--sl-info) 12%, transparent); border: 1px solid color-mix(in srgb, var(--sl-info) 35%, transparent); color: var(--sl-info);
     cursor: pointer;
   }
-  .sec-chip.info   { background: rgba(139,220,255,.12); border-color: rgba(139,220,255,.35); color: #8bdcff; }
-  .sec-chip.warn   { background: rgba(245,167,66,.15);  border-color: rgba(245,167,66,.4);   color: #f5bd67; }
-  .sec-chip.danger { background: rgba(240,96,96,.15);   border-color: rgba(240,96,96,.4);    color: #f06060; }
-  .sec-detail { background: rgba(139,220,255,.04); }
-  .sec-sum { color: #8bdcff; }
+  .sec-chip.info   { background: color-mix(in srgb, var(--sl-info) 12%, transparent); border-color: color-mix(in srgb, var(--sl-info) 35%, transparent); color: var(--sl-info); }
+  .sec-chip.warn   { background: rgba(245,167,66,.15);  border-color: rgba(245,167,66,.4);   color: var(--sl-warning); }
+  .sec-chip.danger { background: color-mix(in srgb, var(--sl-danger) 15%, transparent);   border-color: color-mix(in srgb, var(--sl-danger) 40%, transparent);    color: var(--sl-danger); }
+  .sec-detail { background: color-mix(in srgb, var(--sl-info) 4%, transparent); }
+  .sec-sum { color: var(--sl-info); }
   .sec-body {
     grid-column: 3 / -1;
     display: flex; flex-direction: column; gap: .35rem;
-    color: #c8cadf; font-size: .74rem;
+    color: var(--sl-text); font-size: .74rem;
   }
-  .sec-hdr { color: #ada8ff; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+  .sec-hdr { color: var(--sl-accent-ink); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
   .sec-line { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
-  .sec-flags { color: #7b82a8; font-size: .7rem; }
+  .sec-flags { color: var(--sl-text-faint); font-size: .7rem; }
   .sec-pill {
     padding: .06rem .4rem; border-radius: 3px; font-size: .66rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: .04em;
-    background: rgba(139,220,255,.15); color: #8bdcff;
+    background: color-mix(in srgb, var(--sl-info) 15%, transparent); color: var(--sl-info);
   }
-  .sec-pill.info   { background: rgba(139,220,255,.15); color: #8bdcff; }
-  .sec-pill.warn   { background: rgba(245,167,66,.18);  color: #f5bd67; }
-  .sec-pill.danger { background: rgba(240,96,96,.18);   color: #f06060; }
-  .sec-family  { color: #e7e8f5; font-weight: 600; }
-  .sec-pattern { color: #ada8ff; }
-  .sec-source, .sec-location { color: #7b82a8; font-size: .68rem; }
-  .sec-reason  { color: #c8cadf; }
+  .sec-pill.info   { background: color-mix(in srgb, var(--sl-info) 15%, transparent); color: var(--sl-info); }
+  .sec-pill.warn   { background: rgba(245,167,66,.18);  color: var(--sl-warning); }
+  .sec-pill.danger { background: color-mix(in srgb, var(--sl-danger) 18%, transparent);   color: var(--sl-danger); }
+  .sec-family  { color: var(--sl-text); font-weight: 600; }
+  .sec-pattern { color: var(--sl-accent-ink); }
+  .sec-source, .sec-location { color: var(--sl-text-faint); font-size: .68rem; }
+  .sec-reason  { color: var(--sl-text); }
   .sec-snippet {
     width: 100%; padding: .3rem .5rem;
-    background: #0a0c17; border: 1px solid var(--sl-line); border-radius: 5px;
-    color: #7b82a8; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 5px;
+    color: var(--sl-text-faint); font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: .68rem; white-space: pre-wrap; word-break: break-word;
     margin-top: .1rem;
   }
 
   .flow-detail { background: rgba(64,196,255,.035); }
-  .flow-sum { color: #8bdcff; }
+  .flow-sum { color: var(--sl-info); }
   .flow-body {
     grid-column: 3 / -1;
     margin: 0;
@@ -958,13 +1109,24 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
-    background: #0a0c17;
+    background: var(--sl-surface-inset);
     border: 1px solid var(--sl-line);
     border-radius: 7px;
-    color: #9da3c0;
+    color: var(--sl-text-dim);
     padding: .65rem .75rem;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: .72rem;
     line-height: 1.5;
+  }
+
+  @media (max-width: 900px) {
+    .page { padding: 1rem; }
+    .run-cards { grid-template-columns: 1fr; max-height: 360px; }
+    .activity-head, .activity-actions, .advanced-filters { align-items: flex-start; }
+    .activity-head { flex-direction: column; }
+    .activity-actions { width: 100%; justify-content: space-between; }
+    .advanced-filters { flex-direction: column; }
+    .row { grid-template-columns: 68px 72px minmax(0, 1fr); }
+    .row-action, .sec-chip, .agent-pill { grid-column: 3; justify-self: start; }
   }
 </style>

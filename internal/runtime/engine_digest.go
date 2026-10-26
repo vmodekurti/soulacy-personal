@@ -34,6 +34,11 @@ func bestEffortFinal(chatMsgs []llm.ChatMessage) string {
 		if m.Role != "tool" {
 			continue
 		}
+		// A failed run must not fall back to printing licensed Agensi skill
+		// instructions as its user-facing answer.
+		if isTransientAgensiSkillResult(m.Name) {
+			continue
+		}
 		c := strings.TrimSpace(m.Content)
 		if c == "" {
 			continue

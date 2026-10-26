@@ -97,12 +97,12 @@
     position: relative;
     min-width: 170px;
     max-width: 220px;
-    background: var(--bg-elev-2, #1b2235);
+    background: var(--bg-elev-2, var(--sl-surface-muted));
     border: 1px solid var(--node-accent);
     border-left: 4px solid var(--node-accent);
     border-radius: 10px;
     padding: 10px 12px;
-    color: var(--text, #e6e9f2);
+    color: var(--text, var(--sl-text));
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   }
 
@@ -113,7 +113,7 @@
     border-width: 1px 1px 1px 4px;
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--node-accent) 16%, transparent), transparent 38%),
-      var(--bg-elev-2, #1b2235);
+      var(--bg-elev-2, var(--sl-surface-muted));
   }
 
   /* Branch = decision: clipped corners give a diamond-ish silhouette + the ◆
@@ -125,7 +125,7 @@
     padding-right: 18px;
     background:
       linear-gradient(160deg, color-mix(in srgb, var(--node-accent) 14%, transparent), transparent 50%),
-      var(--bg-elev-2, #1b2235);
+      var(--bg-elev-2, var(--sl-surface-muted));
   }
 
   .studio-node.entry {
@@ -133,10 +133,10 @@
   }
   /* Validation rings (also driven by the node wrapper class for safety). */
   .studio-node.invalid {
-    box-shadow: 0 0 0 2px var(--error, #ff6b81), 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 2px var(--error, var(--sl-danger)), 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   .studio-node.warn {
-    box-shadow: 0 0 0 2px var(--warn, #f5a742), 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 2px var(--warn, var(--sl-warning)), 0 4px 16px rgba(0, 0, 0, 0.4);
   }
 
   /* Post-build execution accents — restrained, semantic. Validation rings
@@ -145,10 +145,10 @@
     box-shadow: 0 0 0 1.5px var(--ok, #38c172), 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   .studio-node.state-repaired {
-    box-shadow: 0 0 0 1.5px var(--warn, #f5a742), 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 1.5px var(--warn, var(--sl-warning)), 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   .studio-node.state-problem {
-    box-shadow: 0 0 0 1.5px var(--error, #ff6b81), 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 1.5px var(--error, var(--sl-danger)), 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   .state-dot {
     width: 7px;
@@ -158,14 +158,14 @@
     flex: none;
   }
   .state-dot.ok { background: var(--ok, #38c172); box-shadow: 0 0 6px var(--ok, #38c172); }
-  .state-dot.repaired { background: var(--warn, #f5a742); box-shadow: 0 0 6px var(--warn, #f5a742); }
-  .state-dot.problem { background: var(--error, #ff6b81); box-shadow: 0 0 6px var(--error, #ff6b81); }
+  .state-dot.repaired { background: var(--warn, var(--sl-warning)); box-shadow: 0 0 6px var(--warn, var(--sl-warning)); }
+  .state-dot.problem { background: var(--error, var(--sl-danger)); box-shadow: 0 0 6px var(--error, var(--sl-danger)); }
   /* Author-time readiness dot (Story 8): amber = needs attention, red = risky. */
   .ready-dot {
     width: 7px; height: 7px; border-radius: 50%; margin-left: auto; flex: none;
   }
-  .ready-dot.needs-attention { background: var(--warn, #f5a524); box-shadow: 0 0 6px var(--warn, #f5a524); }
-  .ready-dot.risky { background: var(--error, #ff6b81); box-shadow: 0 0 6px var(--error, #ff6b81); }
+  .ready-dot.needs-attention { background: var(--warn, var(--sl-warning)); box-shadow: 0 0 6px var(--warn, var(--sl-warning)); }
+  .ready-dot.risky { background: var(--error, var(--sl-danger)); box-shadow: 0 0 6px var(--error, var(--sl-danger)); }
 
   .node-head {
     display: flex;
@@ -225,7 +225,7 @@
     gap: 8px;
     margin-top: 4px;
     font-size: 10px;
-    color: var(--text-muted, #8b93ab);
+    color: var(--text-muted, var(--sl-text-faint));
   }
   .node-out {
     white-space: nowrap;
@@ -239,7 +239,7 @@
     transform: translateY(-50%);
     font-size: 9px;
     line-height: 1;
-    color: var(--text-muted, #8b93ab);
+    color: var(--text-muted, var(--sl-text-faint));
     white-space: nowrap;
     pointer-events: none;
   }

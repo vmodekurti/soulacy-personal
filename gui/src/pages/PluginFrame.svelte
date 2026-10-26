@@ -69,8 +69,8 @@
   .principal {
     font-family: ui-monospace, monospace;
     font-size: 0.75rem;
-    color: #8a91b4;
-    border: 1px solid #2a2f4a;
+    color: var(--sl-text-faint);
+    border: 1px solid var(--sl-line);
     border-radius: 4px;
     padding: 0.1rem 0.4rem;
   }
@@ -78,10 +78,10 @@
     flex: 1;
     width: 100%;
     min-height: 70vh;
-    border: 1px solid #2a2f4a;
+    border: 1px solid var(--sl-line);
     border-radius: 8px;
     background: #fff;
   }
-  .state { padding: 2rem; color: #8a91b4; }
-  .state.error { color: #ff7676; }
+  .state { padding: 2rem; color: var(--sl-text-faint); }
+  .state.error { color: var(--sl-danger); }
 </style>

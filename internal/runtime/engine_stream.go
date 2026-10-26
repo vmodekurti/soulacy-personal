@@ -28,6 +28,8 @@ func (e *Engine) collectCompletionStream(ctx context.Context, resp *llm.Completi
 		content.WriteString(token)
 	}
 	resp.Content = content.String()
+	capture, maxBytes := e.llmObservability()
+	e.sink.Emit(message.Event{Type: "llm.response.content", AgentID: agentID, SessionID: sessionID, Payload: completionContentPayload(resp, capture, maxBytes), Timestamp: time.Now().UTC()})
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("engine: streaming model response interrupted: %w", err)
 	}

@@ -550,7 +550,7 @@
   .item-badge {
     display: inline-block; margin-left: 6px; padding: 0 6px;
     font-size: 10px; line-height: 16px; border-radius: 8px;
-    background: rgba(108,140,255,0.18); color: var(--accent, #6c8cff);
+    background: rgba(108,140,255,0.18); color: var(--accent, var(--sl-accent-ink));
     vertical-align: middle;
   }
   .risk-badge {
@@ -559,9 +559,9 @@
     text-transform: uppercase; letter-spacing: .03em; font-weight: 700;
   }
   .risk-badge.risk-write { background: rgba(120,160,255,.16); color: #8fb0ff; }
-  .risk-badge.risk-network { background: rgba(245,165,36,.16); color: #f5a524; }
+  .risk-badge.risk-network { background: rgba(245,165,36,.16); color: var(--sl-warning); }
   .risk-badge.risk-privileged { background: rgba(255,120,80,.18); color: #ff8b60; }
-  .risk-badge.risk-shell_system { background: rgba(255,107,129,.2); color: #ff6b81; }
+  .risk-badge.risk-shell_system { background: rgba(255,107,129,.2); color: var(--sl-danger); }
   .item-sub {
     margin-top: 2px;
     font-size: 11px;
@@ -603,7 +603,7 @@
   .browse-btn:hover:not(:disabled) { border-color: var(--accent); }
   .browse-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .browse-msg { margin-top: 8px; font-size: 11px; }
-  .browse-msg.browse-err { color: var(--error, #ff6b81); }
+  .browse-msg.browse-err { color: var(--error, var(--sl-danger)); }
   .browse-msg.browse-ok { color: var(--ok, #36d399); }
   .browse-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .browse-item {

@@ -324,6 +324,13 @@ func confirmsAll(values []string) bool {
 }
 
 func validateLLMFit(report *Report, def *agent.Definition, opts Options) {
+	routing := strings.ToLower(strings.TrimSpace(def.LLM.Routing))
+	switch routing {
+	case "", "auto", "fast", "strong", "pinned":
+	default:
+		report.add(Error, "llm.routing", fmt.Sprintf("unsupported model routing mode %q", def.LLM.Routing), "choose auto, fast, strong, or pinned", []string{"auto", "fast", "strong", "pinned"})
+	}
+
 	provider := strings.TrimSpace(def.LLM.Provider)
 	if provider == "" && opts.Config != nil {
 		provider = opts.Config.LLM.DefaultProvider

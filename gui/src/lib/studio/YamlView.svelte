@@ -147,7 +147,7 @@
     align-self: stretch;
     min-height: 360px;
     height: 100%;
-    background: #0e1020;
+    background: var(--sl-surface-inset);
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
@@ -163,7 +163,7 @@
     padding: 12px 8px 12px 0;
     text-align: right;
     color: #4a5078;
-    background: #0b0d1a;
+    background: var(--sl-surface-inset);
     border-right: 1px solid var(--border);
     overflow: hidden;
     user-select: none;
@@ -195,8 +195,8 @@
     inset: 0;
   }
   .yv-pre {
-    color: #d7dcf5 !important;
-    -webkit-text-fill-color: #d7dcf5;
+    color: var(--sl-text) !important;
+    -webkit-text-fill-color: var(--sl-text);
     pointer-events: none;
     overflow: hidden;            /* scroll is driven by the textarea */
     z-index: 3;
@@ -221,7 +221,7 @@
     -webkit-appearance: none;
     appearance: none;
     border: 0;
-    caret-color: #8ab4ff;
+    caret-color: var(--sl-info);
     resize: none;
     outline: none;
     z-index: 2;
@@ -229,11 +229,11 @@
   .yv-ta::selection { background: color-mix(in srgb, var(--sl-accent) 35%, transparent); }
 
   /* Token colors */
-  .yv :global(.y-key)     { color: #7fb4ff; }
+  .yv :global(.y-key)     { color: var(--sl-info); }
   .yv :global(.y-colon)   { color: var(--sl-text-faint); }
   .yv :global(.y-dash)    { color: var(--sl-text-faint); }
   .yv :global(.y-str)     { color: #8ed09a; }
-  .yv :global(.y-num)     { color: #e7b765; }
+  .yv :global(.y-num)     { color: var(--sl-warning); }
   .yv :global(.y-bool)    { color: #c792ea; }
   .yv :global(.y-comment) { color: #5a6080; font-style: italic; }
   /* Template expressions are tinted so {{ .notebook.id }} stands out. NO padding

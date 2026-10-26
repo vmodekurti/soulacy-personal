@@ -207,9 +207,17 @@ func TestValidateBrowserStorageStateDomainConfinement(t *testing.T) {
 	if err := validateBrowserStorageState(parentDomainSSO, []string{"notebook.google.com"}); err != nil {
 		t.Fatalf("parent-domain SSO cookie rejected: %v", err)
 	}
+	approvedSubdomain := json.RawMessage(`{"cookies":[{"name":"session","value":"opaque","domain":"www.gartner.com","path":"/"}],"origins":[]}`)
+	if err := validateBrowserStorageState(approvedSubdomain, []string{"gartner.com"}); err != nil {
+		t.Fatalf("approved subdomain cookie rejected: %v", err)
+	}
 	foreignCookie := json.RawMessage(`{"cookies":[{"name":"session","value":"opaque","domain":"evil.test"}],"origins":[]}`)
-	if err := validateBrowserStorageState(foreignCookie, []string{"hbr.org"}); err == nil || !strings.Contains(err.Error(), "outside") {
+	if err := validateBrowserStorageState(foreignCookie, []string{"hbr.org"}); err == nil || !strings.Contains(err.Error(), "evil.test") || !strings.Contains(err.Error(), "hbr.org") {
 		t.Fatalf("foreign cookie error = %v", err)
+	}
+	publicSuffixCookie := json.RawMessage(`{"cookies":[{"name":"session","value":"opaque","domain":"com","path":"/"}],"origins":[]}`)
+	if err := validateBrowserStorageState(publicSuffixCookie, []string{"gartner.com"}); err == nil {
+		t.Fatal("public-suffix cookie should be rejected")
 	}
 	foreignOrigin := json.RawMessage(`{"cookies":[],"origins":[{"origin":"https://evil.test","localStorage":[{"name":"state","value":"opaque"}]}]}`)
 	if err := validateBrowserStorageState(foreignOrigin, []string{"hbr.org"}); err == nil || !strings.Contains(err.Error(), "outside") {

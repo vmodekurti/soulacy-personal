@@ -49,5 +49,5 @@
   }
   .sep { color: #3d4360; }
   .part { white-space: nowrap; }
-  .fail { color: #ff9a9a; overflow-wrap: anywhere; }
+  .fail { color: var(--sl-danger); overflow-wrap: anywhere; }
 </style>

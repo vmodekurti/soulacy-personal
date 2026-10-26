@@ -3386,6 +3386,7 @@ type mcpAuthBody struct {
 	ClientSecretRef string   `json:"client_secret_ref"`
 	Scopes          []string `json:"scopes"`
 	Audience        string   `json:"audience"`
+	Resource        string   `json:"resource"`
 }
 
 func (a mcpAuthBody) toMCP() mcp.AuthConfig {
@@ -3393,6 +3394,7 @@ func (a mcpAuthBody) toMCP() mcp.AuthConfig {
 		Type: a.Type, Header: a.Header, Scheme: a.Scheme, SecretRef: a.SecretRef,
 		TokenURL: a.TokenURL, ClientID: a.ClientID, ClientSecretRef: a.ClientSecretRef,
 		Scopes: a.Scopes, Audience: a.Audience,
+		Resource: a.Resource,
 	}
 }
 
@@ -3457,6 +3459,14 @@ func validateMCPServer(body mcpServerBody) string {
 			}
 			if body.Auth.ClientSecretRef == "" && body.AuthSecret == "" {
 				return "OAuth client credentials requires a saved client secret or a new client secret"
+			}
+		case "oauth_authorization_code":
+			if body.Auth.TokenURL == "" || body.Auth.ClientID == "" || body.Auth.SecretRef == "" {
+				return "OAuth authorization requires a completed browser sign-in"
+			}
+			tokenURL, err := url.ParseRequestURI(body.Auth.TokenURL)
+			if err != nil || tokenURL.Scheme != "https" || tokenURL.Host == "" || tokenURL.User != nil {
+				return "OAuth token URL must be a valid HTTPS URL without embedded credentials"
 			}
 		default:
 			return fmt.Sprintf("unknown authentication type %q", body.Auth.Type)
@@ -3952,6 +3962,9 @@ func mcpServerToYAML(body mcpServerBody) map[string]any {
 			}
 			if body.Auth.Audience != "" {
 				auth["audience"] = body.Auth.Audience
+			}
+			if body.Auth.Resource != "" {
+				auth["resource"] = body.Auth.Resource
 			}
 			out["auth"] = auth
 		}
@@ -4540,11 +4553,16 @@ func (s *Server) handleListProviders(c *fiber.Ctx) error {
 	// Known provider IDs the GUI should always offer (even when not yet
 	// configured), so users can pick them from a dropdown to add credentials.
 	known := []string{"ollama", "openai", "anthropic", "google", "groq", "mistral", "openrouter", "deepseek", "together"}
+	routingHealth := []map[string]any{}
+	if s.llmRouter != nil {
+		routingHealth = s.llmRouter.RoutingHealth()
+	}
 	return c.JSON(fiber.Map{
 		"providers":        providers,
 		"default_provider": s.cfg.LLM.DefaultProvider,
 		"known":            known,
 		"registered":       s.llmRouter.ProviderIDs(),
+		"routing_health":   routingHealth,
 	})
 }
 

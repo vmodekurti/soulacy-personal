@@ -318,12 +318,12 @@
   .score { margin-left: 0.5rem; font-size: 0.75rem; opacity: 0.6; }
   .badge { display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px; font-size: 0.75rem; border: 1px solid rgba(128,128,128,0.4); margin-left: 0.25rem; }
   .cat-preference { border-color: #7c9cff; }
-  .cat-identity { border-color: #62d2a2; }
-  .cat-constraint { border-color: #f6b26b; }
+  .cat-identity { border-color: var(--sl-success); }
+  .cat-constraint { border-color: var(--sl-warning); }
   .cat-entity { border-color: #c58af9; }
   .st-superseded, .st-retracted { opacity: 0.6; }
-  .ev-retracted, .ev-deleted { border-color: #f08080; }
-  .ev-created { border-color: #62d2a2; }
+  .ev-retracted, .ev-deleted { border-color: var(--sl-danger); }
+  .ev-created { border-color: var(--sl-success); }
   .src { margin-left: 0.15rem; }
   .actions { display: flex; gap: 0.35rem; justify-content: flex-end; }
   .sm { padding: 0.2rem 0.55rem; font-size: 0.8rem; }
