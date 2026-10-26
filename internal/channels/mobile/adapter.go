@@ -23,6 +23,7 @@ type Adapter struct {
 	relayURL      string
 	relayToken    string
 	apns          *apnsClient
+	fcm           *fcmClient
 	pushConfigErr error
 	client        *http.Client
 	log           *zap.Logger
@@ -35,10 +36,11 @@ func New(store *Store, log *zap.Logger) *Adapter {
 		log = zap.NewNop()
 	}
 	apns, apnsErr := newAPNSClientFromEnvironment()
+	fcm, fcmErr := newFCMClientFromEnvironment()
 	a := &Adapter{
 		store: store, relayURL: strings.TrimRight(strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_URL")), "/"),
 		relayToken: strings.TrimSpace(os.Getenv("SOULACY_MOBILE_PUSH_RELAY_TOKEN")),
-		apns:       apns, pushConfigErr: apnsErr,
+		apns:       apns, fcm: fcm, pushConfigErr: errors.Join(apnsErr, fcmErr),
 		client: &http.Client{Timeout: 8 * time.Second}, log: log.Named("mobile-channel"),
 	}
 	SetDefaultAdapter(a)
@@ -89,7 +91,9 @@ type Notification struct {
 }
 
 // CanPush reports whether any push transport is configured.
-func (a *Adapter) CanPush() bool { return a != nil && (a.apns != nil || a.relayURL != "") }
+func (a *Adapter) CanPush() bool {
+	return a != nil && (a.apns != nil || a.fcm != nil || a.relayURL != "")
+}
 
 // Notify pushes n to every notification-enabled device matching destination
 // ("" = every device in the workspace, "user:<id>", or "device:<id>").
@@ -108,11 +112,33 @@ func (a *Adapter) Notify(ctx context.Context, workspaceID, destination string, n
 		rn := relayNotification{DeviceToken: device.PushToken, Environment: device.PushEnvironment,
 			BundleID: device.BundleID, Title: n.Title, Body: n.Body, DeepLink: n.DeepLink,
 			Category: n.Category, ThreadID: n.ThreadID, Data: n.Data, TimeSensitive: n.TimeSensitive}
+		if device.Platform == PlatformAndroid {
+			if err := a.pushAndroid(ctx, workspaceID, device, rn); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		if err := a.deliver(ctx, rn); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+// pushAndroid sends one notification to an Android device over FCM. A token
+// FCM reports as unregistered is cleared so later pushes skip the device
+// until the app registers a fresh one.
+func (a *Adapter) pushAndroid(ctx context.Context, workspaceID string, device Device, n relayNotification) error {
+	if a.fcm == nil {
+		return errors.New("FCM is not configured for Android devices")
+	}
+	err := a.fcm.push(ctx, n)
+	if errors.Is(err, ErrFCMUnregistered) {
+		if clearErr := a.store.ClearPushToken(ctx, workspaceID, device.ID, device.PushToken); clearErr != nil {
+			a.log.Warn("could not clear unregistered FCM token", zap.String("device_id", device.ID), zap.Error(clearErr))
+		}
+	}
+	return err
 }
 
 // deliver sends one relayNotification over APNs when configured, otherwise
@@ -173,6 +199,11 @@ func (a *Adapter) Status() sdkchannel.AdapterStatus {
 		detail += "; native push misconfigured"
 	} else if a.apns != nil {
 		detail += "; direct APNs ready"
+		if a.fcm != nil {
+			detail += "; FCM ready"
+		}
+	} else if a.fcm != nil && a.relayURL == "" {
+		detail += "; FCM ready"
 	} else if a.relayURL == "" {
 		detail += "; push relay not configured"
 	} else {
@@ -194,7 +225,7 @@ func (a *Adapter) Send(ctx context.Context, msg message.Message) error {
 	}
 	// APNs is a wake-up signal, not the source of truth. A relay failure must
 	// never turn a safely persisted result into an undelivered run.
-	if a.apns != nil || a.relayURL != "" {
+	if a.CanPush() {
 		if err := a.notify(ctx, "personal", d); err != nil {
 			a.log.Warn("native push failed; result remains in the mobile inbox", zap.String("delivery_id", d.ID), zap.Error(err))
 		}
@@ -237,6 +268,19 @@ func (a *Adapter) notify(ctx context.Context, workspaceID string, delivery Deliv
 			BundleID: device.BundleID, DeliveryID: delivery.ID, Title: delivery.Title,
 			Body: "An agent result is ready to review.", DeepLink: "soulacy://delivery/" + delivery.ID,
 			Category: CategoryDelivery, ThreadID: "delivery-" + delivery.AgentID}
+		if device.Platform == PlatformAndroid {
+			if err := a.pushAndroid(ctx, workspaceID, device, notification); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if a.apns == nil && a.relayURL == "" {
+			// Only FCM is configured; iOS devices have no transport.
+			if firstErr == nil {
+				firstErr = errors.New("no push transport configured for iOS devices")
+			}
+			continue
+		}
 		if a.apns != nil {
 			if err := a.apns.push(ctx, notification); err != nil && firstErr == nil {
 				firstErr = err

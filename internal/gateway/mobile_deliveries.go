@@ -7,6 +7,7 @@ import (
 	"github.com/soulacy/soulacy/internal/presentation"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -24,9 +25,17 @@ type mobileDeviceRequest struct {
 	// LiveStartToken is the ActivityKit push-to-start token, when the phone
 	// allows agents on its lock screen.
 	LiveStartToken string `json:"live_start_token"`
+	// Platform is "ios" (default when empty) or "android". Android devices
+	// register an opaque FCM token and the dev.soulacy.android package.
+	Platform string `json:"platform"`
 }
 
-const personalIOSBundleID = "dev.soulacy.ios"
+const (
+	personalIOSBundleID     = mobilechan.BundleIOS
+	personalAndroidBundleID = mobilechan.BundleAndroid
+	// maxFCMTokenLength bounds an opaque FCM registration token.
+	maxFCMTokenLength = 4096
+)
 
 func mobileStore(c *fiber.Ctx) (*mobilechan.Store, error) {
 	store := mobilechan.DefaultStore()
@@ -66,29 +75,30 @@ func (s *Server) handleRegisterMobileDevice(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return s.errJSON(c, fiber.StatusBadRequest, err)
 	}
-	req.ID, req.PushToken = strings.TrimSpace(req.ID), strings.ToLower(strings.TrimSpace(req.PushToken))
+	req.ID = strings.TrimSpace(req.ID)
 	if req.ID == "" {
 		return s.errMsg(c, fiber.StatusBadRequest, "device id is required")
 	}
 	if len(req.ID) > 128 || len(req.Name) > 200 {
 		return s.errMsg(c, fiber.StatusBadRequest, "device id or name is too long")
 	}
-	if req.BundleID != "" && req.BundleID != personalIOSBundleID {
-		return s.errMsg(c, fiber.StatusBadRequest, "bundle_id must identify the Soulacy iOS app")
-	}
-	req.LiveStartToken = strings.ToLower(strings.TrimSpace(req.LiveStartToken))
-	if req.LiveStartToken != "" && !validHexToken(req.LiveStartToken) {
-		return s.errMsg(c, fiber.StatusBadRequest, "live_start_token must be a 32-byte APNs token encoded as hexadecimal")
-	}
-	if req.PushToken != "" {
-		decoded, decodeErr := hex.DecodeString(req.PushToken)
-		if decodeErr != nil || len(decoded) != 32 {
-			return s.errMsg(c, fiber.StatusBadRequest, "push_token must be a 32-byte APNs token encoded as hexadecimal")
+	var device mobilechan.Device
+	switch strings.ToLower(strings.TrimSpace(req.Platform)) {
+	case "", mobilechan.PlatformIOS:
+		var msg string
+		device, msg = iosDeviceFromRequest(req)
+		if msg != "" {
+			return s.errMsg(c, fiber.StatusBadRequest, msg)
 		}
+	case mobilechan.PlatformAndroid:
+		var msg string
+		device, msg = androidDeviceFromRequest(req)
+		if msg != "" {
+			return s.errMsg(c, fiber.StatusBadRequest, msg)
+		}
+	default:
+		return s.errMsg(c, fiber.StatusBadRequest, `platform must be "ios" or "android"`)
 	}
-	device := mobilechan.Device{ID: req.ID, Name: strings.TrimSpace(req.Name), PushToken: req.PushToken,
-		PushEnvironment: req.PushEnvironment, BundleID: personalIOSBundleID, NotificationsEnabled: req.NotificationsEnabled,
-		LiveStartToken: req.LiveStartToken}
 	if err := store.UpsertDevice(c.UserContext(), workspaceID, userID, device); err != nil {
 		if errors.Is(err, mobilechan.ErrDeviceOwnership) {
 			return s.errMsg(c, fiber.StatusForbidden, "device is registered to another user")
@@ -96,6 +106,45 @@ func (s *Server) handleRegisterMobileDevice(c *fiber.Ctx) error {
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"registered": true, "device_id": req.ID})
+}
+
+// iosDeviceFromRequest validates an iOS registration: a 32-byte hex APNs
+// token and the Soulacy iOS bundle. It returns a client-facing message when
+// the request is invalid.
+func iosDeviceFromRequest(req mobileDeviceRequest) (mobilechan.Device, string) {
+	req.PushToken = strings.ToLower(strings.TrimSpace(req.PushToken))
+	if req.BundleID != "" && req.BundleID != personalIOSBundleID {
+		return mobilechan.Device{}, "bundle_id must identify the Soulacy iOS app"
+	}
+	req.LiveStartToken = strings.ToLower(strings.TrimSpace(req.LiveStartToken))
+	if req.LiveStartToken != "" && !validHexToken(req.LiveStartToken) {
+		return mobilechan.Device{}, "live_start_token must be a 32-byte APNs token encoded as hexadecimal"
+	}
+	if req.PushToken != "" {
+		decoded, decodeErr := hex.DecodeString(req.PushToken)
+		if decodeErr != nil || len(decoded) != 32 {
+			return mobilechan.Device{}, "push_token must be a 32-byte APNs token encoded as hexadecimal"
+		}
+	}
+	return mobilechan.Device{ID: req.ID, Name: strings.TrimSpace(req.Name), PushToken: req.PushToken,
+		PushEnvironment: req.PushEnvironment, BundleID: personalIOSBundleID, NotificationsEnabled: req.NotificationsEnabled,
+		LiveStartToken: req.LiveStartToken, Platform: mobilechan.PlatformIOS}, ""
+}
+
+// androidDeviceFromRequest validates an Android registration. The FCM token
+// is opaque and case-sensitive, so it is only bounded, never reformatted.
+// APNs environments and Live Activity tokens do not apply and are dropped.
+func androidDeviceFromRequest(req mobileDeviceRequest) (mobilechan.Device, string) {
+	req.PushToken = strings.TrimSpace(req.PushToken)
+	if req.BundleID != "" && req.BundleID != personalAndroidBundleID {
+		return mobilechan.Device{}, "bundle_id must identify the Soulacy Android app"
+	}
+	if len(req.PushToken) > maxFCMTokenLength || strings.IndexFunc(req.PushToken, unicode.IsSpace) >= 0 {
+		return mobilechan.Device{}, "push_token must be an FCM registration token of at most 4096 characters without whitespace"
+	}
+	return mobilechan.Device{ID: req.ID, Name: strings.TrimSpace(req.Name), PushToken: req.PushToken,
+		BundleID: personalAndroidBundleID, NotificationsEnabled: req.NotificationsEnabled,
+		Platform: mobilechan.PlatformAndroid}, ""
 }
 
 func (s *Server) handleDeleteMobileDevice(c *fiber.Ctx) error {

@@ -82,6 +82,17 @@ type Delivery struct {
 	ReadAt      *time.Time        `json:"read_at,omitempty"`
 }
 
+// Device platforms. Existing rows predate Android and are iOS.
+const (
+	PlatformIOS     = "ios"
+	PlatformAndroid = "android"
+
+	// BundleIOS and BundleAndroid are the only app identifiers a Personal
+	// gateway pushes to.
+	BundleIOS     = "dev.soulacy.ios"
+	BundleAndroid = "dev.soulacy.android"
+)
+
 type Device struct {
 	ID                   string `json:"id"`
 	UserID               string `json:"user_id"`
@@ -90,6 +101,8 @@ type Device struct {
 	PushEnvironment      string `json:"push_environment"`
 	BundleID             string `json:"bundle_id"`
 	NotificationsEnabled bool   `json:"notifications_enabled"`
+	// Platform is PlatformIOS (APNs) or PlatformAndroid (FCM).
+	Platform string `json:"platform"`
 	// LiveStartToken lets the gateway start a Live Activity while the app is closed.
 	LiveStartToken string    `json:"live_start_token,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -134,6 +147,14 @@ func Open(path string) (*Store, error) {
 	if err := store.ensureLiveColumns(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("mobile delivery: live activity schema: %w", err)
+	}
+	if err := store.ensurePlatformColumn(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("mobile delivery: device platform schema: %w", err)
+	}
+	if err := sqlitex.RecordSchemaVersion(db, "mobile_deliveries", 2); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	return store, nil
 }
@@ -330,26 +351,41 @@ func (s *Store) UpsertDevice(ctx context.Context, workspaceID, userID string, d 
 	if strings.TrimSpace(d.ID) == "" || strings.TrimSpace(userID) == "" {
 		return errors.New("mobile device requires id and authenticated user")
 	}
-	if d.Name == "" {
-		d.Name = "iPhone"
-	}
-	if d.PushEnvironment != "development" {
-		d.PushEnvironment = "production"
-	}
-	if d.BundleID == "" {
-		d.BundleID = "dev.soulacy.ios"
+	d.Platform = normalizePlatform(d.Platform)
+	if d.Platform == PlatformAndroid {
+		// APNs environments and ActivityKit tokens have no Android meaning.
+		if d.Name == "" {
+			d.Name = "Android phone"
+		}
+		d.PushEnvironment, d.LiveStartToken = "", ""
+		if d.BundleID == "" {
+			d.BundleID = BundleAndroid
+		}
+	} else {
+		if d.Name == "" {
+			d.Name = "iPhone"
+		}
+		if d.PushEnvironment != "development" {
+			d.PushEnvironment = "production"
+		}
+		if d.BundleID == "" {
+			d.BundleID = BundleIOS
+		}
+		d.LiveStartToken = strings.ToLower(strings.TrimSpace(d.LiveStartToken))
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO mobile_devices
-    (workspace_id,id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,live_start_token,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,id) DO UPDATE SET
+    (workspace_id,id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,live_start_token,platform,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,id) DO UPDATE SET
       user_id=excluded.user_id,name=excluded.name,push_token=excluded.push_token,
       push_environment=excluded.push_environment,bundle_id=excluded.bundle_id,
       notifications_enabled=excluded.notifications_enabled,
-      live_start_token=COALESCE(NULLIF(excluded.live_start_token,''),mobile_devices.live_start_token),
+      live_start_token=CASE WHEN excluded.platform='android' THEN ''
+        ELSE COALESCE(NULLIF(excluded.live_start_token,''),mobile_devices.live_start_token) END,
+      platform=excluded.platform,
       updated_at=excluded.updated_at
     WHERE mobile_devices.user_id=excluded.user_id`,
 		normalizeWorkspaceID(workspaceID), d.ID, userID, d.Name, d.PushToken, d.PushEnvironment, d.BundleID,
-		d.NotificationsEnabled, strings.ToLower(strings.TrimSpace(d.LiveStartToken)), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		d.NotificationsEnabled, d.LiveStartToken, d.Platform, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -361,7 +397,7 @@ func (s *Store) UpsertDevice(ctx context.Context, workspaceID, userID string, d 
 
 // DevicesForUser lists the devices a person registered, newest first.
 func (s *Store) DevicesForUser(ctx context.Context, workspaceID, userID string) ([]Device, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,created_at,updated_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,platform,created_at,updated_at
     FROM mobile_devices WHERE workspace_id=? AND user_id=? ORDER BY updated_at DESC`, normalizeWorkspaceID(workspaceID), strings.TrimSpace(userID))
 	if err != nil {
 		return nil, err
@@ -372,7 +408,7 @@ func (s *Store) DevicesForUser(ctx context.Context, workspaceID, userID string) 
 		var d Device
 		var enabled int
 		var created, updated string
-		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.PushToken, &d.PushEnvironment, &d.BundleID, &enabled, &created, &updated); err != nil {
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.PushToken, &d.PushEnvironment, &d.BundleID, &enabled, &d.Platform, &created, &updated); err != nil {
 			return nil, err
 		}
 		d.NotificationsEnabled = enabled == 1
@@ -426,7 +462,7 @@ func (s *Store) requireDeviceOwner(ctx context.Context, workspaceID, deviceID, u
 
 func (s *Store) TargetDevices(ctx context.Context, workspaceID, destination string) ([]Device, error) {
 	workspaceID, destination = normalizeWorkspaceID(workspaceID), normalizeDestination(destination)
-	query := `SELECT id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,created_at,updated_at
+	query := `SELECT id,user_id,name,push_token,push_environment,bundle_id,notifications_enabled,platform,created_at,updated_at
     FROM mobile_devices WHERE workspace_id=? AND notifications_enabled=1 AND push_token<>''`
 	args := []any{workspaceID}
 	if strings.HasPrefix(destination, "device:") {
@@ -446,7 +482,7 @@ func (s *Store) TargetDevices(ctx context.Context, workspaceID, destination stri
 		var d Device
 		var created, updated string
 		if err := rows.Scan(&d.ID, &d.UserID, &d.Name, &d.PushToken, &d.PushEnvironment, &d.BundleID,
-			&d.NotificationsEnabled, &created, &updated); err != nil {
+			&d.NotificationsEnabled, &d.Platform, &created, &updated); err != nil {
 			return nil, err
 		}
 		d.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -454,6 +490,60 @@ func (s *Store) TargetDevices(ctx context.Context, workspaceID, destination stri
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// ClearPushToken forgets a push token the push service reported as no longer
+// registered. It only clears the row while it still holds that token, so a
+// phone that re-registered in the meantime keeps its fresh token.
+func (s *Store) ClearPushToken(ctx context.Context, workspaceID, deviceID, token string) error {
+	if strings.TrimSpace(deviceID) == "" || token == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE mobile_devices SET push_token='', updated_at=?
+    WHERE workspace_id=? AND id=? AND push_token=?`, time.Now().UTC().Format(time.RFC3339Nano),
+		normalizeWorkspaceID(workspaceID), strings.TrimSpace(deviceID), token)
+	return err
+}
+
+// ensurePlatformColumn adds the platform column to devices registered before
+// Android existed. Every such row is an iOS device.
+func (s *Store) ensurePlatformColumn() error {
+	return s.ensureDeviceColumn("platform", `ALTER TABLE mobile_devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'ios'`)
+}
+
+// ensureDeviceColumn runs ddl unless mobile_devices already has column.
+// SQLite has no ADD COLUMN IF NOT EXISTS.
+func (s *Store) ensureDeviceColumn(column, ddl string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(mobile_devices)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+	_, err = s.db.Exec(ddl)
+	return err
+}
+
+func normalizePlatform(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), PlatformAndroid) {
+		return PlatformAndroid
+	}
+	return PlatformIOS
 }
 
 func normalizeDestination(v string) string {
