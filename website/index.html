@@ -145,6 +145,7 @@
       <div class="hidden md:flex items-center gap-6 text-sm text-ink-400">
         <a href="#genie" class="hover:text-ink-100">Genie</a>
         <a href="#iphone" class="hover:text-ink-100">iPhone</a>
+        <a href="#android" class="hover:text-ink-100">Android</a>
         <a href="#security" class="hover:text-ink-100">Security</a>
         <a href="#assistant" class="hover:text-ink-100">What it does</a>
         <a href="#compare"  class="hover:text-ink-100">Compare</a>
@@ -407,6 +408,39 @@
         </div>
       </div>
       <p class="mt-6 text-sm text-ink-400"><a href="https://docs.soulacy.io/iphone/" class="text-signal-400 hover:text-signal-300">How the iPhone app works &rarr;</a></p>
+    </div>
+  </section>
+
+  <!-- ── ANDROID ──────────────────────────────────────────────────────────── -->
+  <section id="android" class="border-t border-white/5 scroll-mt-24">
+    <div class="mx-auto max-w-6xl px-4 py-16 md:py-20">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight">On Android too.</h2>
+      <p class="mt-4 max-w-3xl text-ink-400 leading-relaxed">The Android companion pairs with your gateway by QR code, chats with your agents as they stream their replies, and asks for your fingerprint, face or screen lock before any approval. Results and approval requests arrive as notifications. Like the iPhone app, it talks to your gateway, not to us, and carries no analytics.</p>
+
+      <div class="mt-10 grid md:grid-cols-2 gap-4">
+        <div class="card p-6">
+          <h3 class="font-semibold text-ink-100">Download</h3>
+          <p class="mt-2 text-sm text-ink-400 leading-relaxed">Requires Android 8.0 or newer. Each release is a signed APK published on GitHub.</p>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <a href="/android.apk" class="inline-flex items-center rounded-xl bg-wire-500 hover:bg-wire-600 text-white px-5 py-3 text-sm font-medium shadow-glow-wire">Download the APK</a>
+            <a href="/android.apk.sha256" class="text-sm text-signal-400 hover:text-signal-300">SHA-256 checksum</a>
+            <a href="https://github.com/vmodekurti/soulacy-android/releases" class="text-sm text-signal-400 hover:text-signal-300">All releases &rarr;</a>
+          </div>
+          <p class="mt-5 text-xs text-ink-400">Check the download before installing. The two values must match:</p>
+          <pre class="mt-2 code-font text-xs bg-ink-950/60 border border-white/10 rounded-lg p-3 overflow-x-auto"><code>curl -fsSL https://soulacy.io/android.apk.sha256
+shasum -a 256 soulacy-android.apk</code></pre>
+        </div>
+        <div class="card p-6">
+          <h3 class="font-semibold text-ink-100">Install and pair</h3>
+          <ol class="mt-2 text-sm text-ink-400 leading-relaxed list-decimal pl-5 space-y-1.5">
+            <li>Open the downloaded <span class="code-font">soulacy-android.apk</span> on your phone.</li>
+            <li>When Android asks, allow installs from your browser or file manager for this one install. You can switch it off again afterwards.</li>
+            <li>In the Soulacy web workspace, choose <strong class="text-ink-200">Mobile &rarr; Pair a phone</strong>.</li>
+            <li>In the app, choose <strong class="text-ink-200">Scan pairing code</strong>. The code works once and expires in two minutes.</li>
+          </ol>
+          <p class="mt-4 text-xs text-ink-400">Updates install over the old version because every release is signed with the same key. Android only accepts an update from that key.</p>
+        </div>
+      </div>
     </div>
   </section>
 
