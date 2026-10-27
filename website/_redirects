@@ -12,6 +12,11 @@
 /security                               /#security                        302
 /compare                                /#compare                         302
 /install                                /#install                         302
+/android                                /#android                         302
+
+# Android APK: always the newest published release of the companion app.
+/android.apk                            https://github.com/vmodekurti/soulacy-android/releases/latest/download/soulacy-android.apk          302
+/android.apk.sha256                     https://github.com/vmodekurti/soulacy-android/releases/latest/download/soulacy-android.apk.sha256   302
 
 # Short links for HN / Twitter drops.
 /hn                                     https://news.ycombinator.com/from?site=github.com/vmodekurti/soulacy-personal   302
