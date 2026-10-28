@@ -163,13 +163,13 @@ instead; raw source builds can be limited to an administrator-approved catalog.
 ## Uploading authentication files
 
 Some stdio MCP servers authenticate from a file on disk rather than an
-environment variable — a `cookies.txt`, a saved token, or Playwright storage
+environment variable: a `cookies.txt`, a saved token, or Playwright storage
 state. On a headless or hosted gateway with no shell you cannot copy such a file
 onto the box, so Soulacy lets you upload it against the server from the GUI.
 
 In **MCP → edit a server → Authentication files**, choose **Upload file**. The
-file is stored as an encrypted blob in the credential vault — its contents never
-touch `config.yaml`, logs, tool arguments, or the model prompt. The same
+file is stored as an encrypted blob in the credential vault, so its contents
+never touch `config.yaml`, logs, tool arguments, or the model prompt. The same
 operations are available over the API:
 
 ```
