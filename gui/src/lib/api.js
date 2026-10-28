@@ -774,6 +774,26 @@ export const api = {
     openNotebookStatus:  ()     => apiFetch('/mcp/open-notebook/status'),
     installOpenNotebook: (body = {}) => apiFetch('/mcp/open-notebook/install', { method: 'POST', body: JSON.stringify(body) }),
     provisionGlama:    (body)         => apiFetch('/mcp/provision-glama',    { method: 'POST', body: JSON.stringify(body) }),
+    listFiles:  (id)        => apiFetch(`/mcp/${encodeURIComponent(id)}/files`),
+    deleteFile: (id, name)  => apiFetch(`/mcp/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    uploadFile: async (id, file, name = '') => {
+      const fd = new FormData()
+      fd.append('file', file)
+      if (name) fd.append('name', name)
+      const key = get(apiKey)
+      const headers = {}
+      if (key) headers['Authorization'] = `Bearer ${key}`
+      const res = await fetch(`/api/v1/mcp/${encodeURIComponent(id)}/files`, {
+        method: 'POST', headers, body: fd,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        if (res.status === 401 || res.status === 403) authRequired.set(true)
+        throw Object.assign(new Error(body.error || res.statusText), { status: res.status })
+      }
+      authRequired.set(false)
+      return res.json()
+    },
   },
 
   connections: {

@@ -53,6 +53,58 @@
   // When `editing.id` is set AND matches a row in `servers`, we're editing;
   // otherwise we're creating.
   let editing = null
+
+  // Per-server uploaded auth files (cookies.txt, token files). Only shown when
+  // editing a server that already exists (files attach to a saved id).
+  let mcpFiles = []
+  let mcpFileDirEnv = 'SOULACY_MCP_FILE_DIR'
+  let filesLoading = false
+  let filesBusy = false
+  let filesError = ''
+  let fileInputEl
+
+  async function loadFiles(id) {
+    mcpFiles = []; filesError = ''
+    if (!id) return
+    filesLoading = true
+    try {
+      const r = await api.mcp.listFiles(id)
+      mcpFiles = (r && r.files) || []
+      if (r && r.dir_env) mcpFileDirEnv = r.dir_env
+    } catch (e) {
+      filesError = e.message
+    } finally {
+      filesLoading = false
+    }
+  }
+  async function onFileSelected(e) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length || !editing) return
+    filesBusy = true; filesError = ''
+    try {
+      for (const f of files) {
+        const r = await api.mcp.uploadFile(editing.id, f)
+        if (r && r.files) mcpFiles = r.files
+      }
+    } catch (err) {
+      filesError = err.message
+    } finally {
+      filesBusy = false
+      if (fileInputEl) fileInputEl.value = ''
+    }
+  }
+  async function deleteFile(name) {
+    if (!editing || !confirm(`Remove ${name}?`)) return
+    filesBusy = true; filesError = ''
+    try {
+      const r = await api.mcp.deleteFile(editing.id, name)
+      mcpFiles = (r && r.files) || []
+    } catch (err) {
+      filesError = err.message
+    } finally {
+      filesBusy = false
+    }
+  }
   let saving = false
   let testing = false
   let testResult = null  // { ok, message }
@@ -200,6 +252,7 @@
     editing = BLANK_STDIO()
     testResult = null
     error = ''; info = ''
+    mcpFiles = []; filesError = ''
   }
   function openEdit(s) {
     // Prefill all connection parameters returned from the list endpoint
@@ -220,8 +273,10 @@
     }
     testResult = null
     error = ''; info = ''
+    loadFiles(s.id)
   }
   function closeModal() {
+    mcpFiles = []; filesError = ''; filesBusy = false
     editing = null
     testResult = null
     saving = false
@@ -906,6 +961,33 @@
         </div>
       {/if}
 
+      {#if editing.id && servers.some(s => s.id === editing.id)}
+        <div class="field">
+          <span class="field-label">Authentication files</span>
+          <span class="field-help">Upload files this server reads at runtime (e.g. <code>cookies.txt</code>). Stored encrypted; mounted at <code>{mcpFileDirEnv}/&lt;name&gt;</code> when the server runs. Restart the gateway to apply.</span>
+          {#if filesError}<div class="test-result">✗ {filesError}</div>{/if}
+          {#if filesLoading}
+            <div class="field-help">Loading…</div>
+          {:else if mcpFiles.length}
+            <ul class="mcp-files">
+              {#each mcpFiles as f (f.name)}
+                <li>
+                  <code>{f.name}</code>
+                  <span class="field-help">({f.size} bytes)</span>
+                  <button type="button" class="btn-secondary mcp-file-del" on:click={() => deleteFile(f.name)} disabled={filesBusy}>Remove</button>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <div class="field-help">No files uploaded.</div>
+          {/if}
+          <label class="btn-secondary mcp-file-upload">
+            {filesBusy ? 'Uploading…' : 'Upload file'}
+            <input type="file" bind:this={fileInputEl} on:change={onFileSelected} disabled={filesBusy} hidden />
+          </label>
+        </div>
+      {/if}
+
       {#if testResult}
         <div class="test-result" class:ok={testResult.ok && testResult.credential_verified !== false} class:warn={testResult.ok && testResult.credential_verified === false}>
           {#if testResult.ok}
@@ -1190,6 +1272,10 @@
     color: var(--sl-text); font-size: .85rem; padding: .45rem .65rem; font-family: monospace;
   }
   .field-help { color: #666d91; font-size: .7rem; line-height: 1.45; }
+  .mcp-files { list-style: none; margin: .4rem 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+  .mcp-files li { display: flex; align-items: center; gap: .5rem; }
+  .mcp-file-del { padding: .1rem .5rem; font-size: .7rem; }
+  .mcp-file-upload { display: inline-block; margin-top: .3rem; cursor: pointer; }
   .compact-field { max-width: 180px; }
   .connection-section {
     border: 1px solid var(--sl-surface-muted); border-radius: 9px; background: rgba(10,12,28,.45);
