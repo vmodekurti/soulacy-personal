@@ -2861,6 +2861,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#uploading-authentication-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploading authentication files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#using-mcp-tools-in-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5197,6 +5208,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#uploading-authentication-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploading authentication files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#using-mcp-tools-in-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5431,13 +5453,48 @@ the caller's configuration. Team and Scale deployments accept only HTTPS
 remote MCP definitions through this endpoint and reject stdio. For a repository
 that needs cloning or a build environment, use remote <code>sy package install</code>
 instead; raw source builds can be limited to an administrator-approved catalog.</p>
+<h2 id="uploading-authentication-files">Uploading authentication files<a class="headerlink" href="#uploading-authentication-files" title="Permanent link">&para;</a></h2>
+<p>Some stdio MCP servers authenticate from a file on disk rather than an
+environment variable: a <code>cookies.txt</code>, a saved token, or Playwright storage
+state. On a headless or hosted gateway with no shell you cannot copy such a file
+onto the box, so Soulacy lets you upload it against the server from the GUI.</p>
+<p>In <strong>MCP → edit a server → Authentication files</strong>, choose <strong>Upload file</strong>. The
+file is stored as an encrypted blob in the credential vault, so its contents
+never touch <code>config.yaml</code>, logs, tool arguments, or the model prompt. The same
+operations are available over the API:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>POST   /api/v1/mcp/&lt;id&gt;/files        (multipart: file, optional name)
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>GET    /api/v1/mcp/&lt;id&gt;/files
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>DELETE /api/v1/mcp/&lt;id&gt;/files/&lt;name&gt;
+</span></code></pre></div>
+<p>At each server launch Soulacy writes the uploaded files into a private
+per-server directory (<code>0700</code>, files <code>0600</code>) and points the subprocess at it with
+the <code>SOULACY_MCP_FILE_DIR</code> environment variable. Reference them from the
+server's <code>command</code>/<code>args</code>/<code>env</code>, e.g.:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">mcp</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">servers</span><span class="p">:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">notebooklm</span><span class="p">:</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">notebooklm-mcp</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"--cookies"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"$SOULACY_MCP_FILE_DIR/cookies.txt"</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<p>The vault is the source of truth: files are re-materialized from it on every
+launch, so anything the server writes back to them is overwritten on restart,
+and removing an upload sweeps the on-disk copy. Restart the gateway (or the
+server) to apply a change.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Uploading a session file solves provisioning, not provider trust. A provider
+that binds a session to the device or IP it was created on (Google among
+them) may still reject a session replayed from a different host. See
+<a href="../../agents/authenticated-connections/">Authenticated Website Connections</a>
+for the browser-session alternative.</p>
+</div>
 <h2 id="using-mcp-tools-in-an-agent">Using MCP tools in an agent<a class="headerlink" href="#using-mcp-tools-in-an-agent" title="Permanent link">&para;</a></h2>
 <p>Reference the discovered tool names in a SOUL.yaml <code>tools:</code> block:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nt">tools</span><span class="p">:</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crm-assistant</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">tools</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.search_contacts</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">company-crm.create_note</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem.read_file</span>
 </span></code></pre></div>
 <p>MCP tools carry the same <strong>risk tiers</strong> and policy controls as any other tool
 (see <a href="../safety/">Safety Introspection</a>). A privileged or network-capable MCP tool
