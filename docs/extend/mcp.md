@@ -160,6 +160,49 @@ remote MCP definitions through this endpoint and reject stdio. For a repository
 that needs cloning or a build environment, use remote `sy package install`
 instead; raw source builds can be limited to an administrator-approved catalog.
 
+## Uploading authentication files
+
+Some stdio MCP servers authenticate from a file on disk rather than an
+environment variable: a `cookies.txt`, a saved token, or Playwright storage
+state. On a headless or hosted gateway with no shell you cannot copy such a file
+onto the box, so Soulacy lets you upload it against the server from the GUI.
+
+In **MCP → edit a server → Authentication files**, choose **Upload file**. The
+file is stored as an encrypted blob in the credential vault, so its contents
+never touch `config.yaml`, logs, tool arguments, or the model prompt. The same
+operations are available over the API:
+
+```
+POST   /api/v1/mcp/<id>/files        (multipart: file, optional name)
+GET    /api/v1/mcp/<id>/files
+DELETE /api/v1/mcp/<id>/files/<name>
+```
+
+At each server launch Soulacy writes the uploaded files into a private
+per-server directory (`0700`, files `0600`) and points the subprocess at it with
+the `SOULACY_MCP_FILE_DIR` environment variable. Reference them from the
+server's `command`/`args`/`env`, e.g.:
+
+```yaml
+mcp:
+  servers:
+    notebooklm:
+      command: notebooklm-mcp
+      args: ["--cookies", "$SOULACY_MCP_FILE_DIR/cookies.txt"]
+```
+
+The vault is the source of truth: files are re-materialized from it on every
+launch, so anything the server writes back to them is overwritten on restart,
+and removing an upload sweeps the on-disk copy. Restart the gateway (or the
+server) to apply a change.
+
+!!! note
+    Uploading a session file solves provisioning, not provider trust. A provider
+    that binds a session to the device or IP it was created on (Google among
+    them) may still reject a session replayed from a different host. See
+    [Authenticated Website Connections](../agents/authenticated-connections.md)
+    for the browser-session alternative.
+
 ## Using MCP tools in an agent
 
 Reference the discovered tool names in a SOUL.yaml `tools:` block:

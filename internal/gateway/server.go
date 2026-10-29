@@ -1062,6 +1062,11 @@ func (s *Server) buildApp() *fiber.App {
 	api.Patch("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUpdateMCPServer)
 	api.Delete("/mcp/:id", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPServer)
 	api.Post("/mcp/test", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleTestMCPServer)
+	// Per-server uploaded auth files (cookie jars, token files). Stored encrypted
+	// in the vault and materialized to $SOULACY_MCP_FILE_DIR at server launch.
+	api.Get("/mcp/:id/files", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleListMCPFiles)
+	api.Post("/mcp/:id/files", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleUploadMCPFile)
+	api.Delete("/mcp/:id/files/:name", s.rbacMW(rbac.ResourceMCP, rbac.ActionDelete), s.handleDeleteMCPFile)
 	api.Post("/mcp/install-guide", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleMCPInstallGuide)
 	api.Get("/mcp/open-notebook/status", s.rbacMW(rbac.ResourceMCP, rbac.ActionRead), s.handleOpenNotebookStatus)
 	api.Post("/mcp/open-notebook/install", s.rbacMW(rbac.ResourceMCP, rbac.ActionWrite), s.handleInstallOpenNotebook)
