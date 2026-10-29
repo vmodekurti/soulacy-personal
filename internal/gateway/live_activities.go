@@ -379,6 +379,9 @@ func (s *Server) handleRegisterLiveActivity(c *fiber.Ctx) error {
 		if err == mobilechan.ErrDeviceOwnership {
 			return s.errMsg(c, fiber.StatusForbidden, "device is registered to another user")
 		}
+		if err == mobilechan.ErrLiveActivityUnsupported {
+			return s.errMsg(c, fiber.StatusBadRequest, err.Error())
+		}
 		return s.errJSON(c, fiber.StatusInternalServerError, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"registered": true, "run_key": liveRunKey(req.AgentID, req.SessionID)})
