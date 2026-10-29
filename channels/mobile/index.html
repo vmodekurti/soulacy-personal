@@ -3359,6 +3359,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#android-fcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android (FCM)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lock-screen-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5163,6 +5174,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#android-fcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android (FCM)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#lock-screen-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5313,7 +5335,7 @@
 
 
 <h1 id="soulacy-mobile">Soulacy Mobile<a class="headerlink" href="#soulacy-mobile" title="Permanent link">&para;</a></h1>
-<p>Soulacy Mobile is an always-on outbound channel for the native iOS app. Delivery first writes the complete result to the workspace's durable SQLite inbox. APNs is only a discreet wake-up signal, so a missing or temporarily failing push service never loses an agent result.</p>
+<p>Soulacy Mobile is an always-on outbound channel for the native iOS and Android apps. Delivery first writes the complete result to the workspace's durable SQLite inbox. APNs and FCM are only discreet wake-up signals, so a missing or temporarily failing push service never loses an agent result.</p>
 <h2 id="send-a-scheduled-result">Send a scheduled result<a class="headerlink" href="#send-a-scheduled-result" title="Permanent link">&para;</a></h2>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">schedule</span><span class="p">:</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">cron</span><span class="p">:</span><span class="w"> </span><span class="s">"0</span><span class="nv"> </span><span class="s">8</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*"</span>
@@ -5335,6 +5357,74 @@
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>SOULACY_MOBILE_PUSH_RELAY_TOKEN=replace-with-a-secret
 </span></code></pre></div>
 <p>The gateway posts a token, APNs environment, bundle ID, delivery ID, and a <code>soulacy://delivery/&lt;id&gt;</code> deep link to <code>POST &lt;relay&gt;/v1/push</code>. Notification text is intentionally generic; the sensitive output is fetched from the authenticated gateway after the user opens the app.</p>
+<h2 id="android-fcm">Android (FCM)<a class="headerlink" href="#android-fcm" title="Permanent link">&para;</a></h2>
+<p>The Android app (package <code>dev.soulacy.android</code>) registers through the same
+<code>POST /api/v1/mobile/devices</code> endpoint with <code>"platform": "android"</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;installation-id&gt;"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Pixel 9"</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"android"</span><span class="p">,</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w"> </span><span class="nt">"bundle_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dev.soulacy.android"</span><span class="p">,</span><span class="w"> </span><span class="nt">"push_token"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;FCM registration token&gt;"</span><span class="p">,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w"> </span><span class="nt">"notifications_enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</span></code></pre></div>
+<p><code>platform</code> is <code>ios</code> when omitted, and any other value is rejected. For
+Android, <code>bundle_id</code> may be omitted but otherwise must be
+<code>dev.soulacy.android</code>; <code>push_token</code> is the opaque FCM registration token (at
+most 4096 characters, no whitespace) and is stored exactly as sent.
+<code>push_environment</code> and <code>live_start_token</code> are ignored, and Live Activities
+are never sent to Android devices.</p>
+<p>The gateway sends through the FCM HTTP v1 API as a Google service account.
+Create a service-account key with the Firebase Cloud Messaging permission in
+the Firebase project of the Android app, mount the JSON file read-only into
+the container, then set:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">SOULACY_MOBILE_FCM_CREDENTIALS_FILE</span><span class="o">=</span>/run/secrets/soulacy-fcm-service-account.json
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># Optional: defaults to project_id from the credentials file.</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nv">SOULACY_MOBILE_FCM_PROJECT_ID</span><span class="o">=</span>your-firebase-project
+</span></code></pre></div>
+<p>Never commit the service-account file or paste it into <code>.env</code>. The gateway
+signs its own OAuth2 assertion with the key, exchanges it at the file's
+<code>token_uri</code> for an access token, and reuses that token until shortly before
+it expires. FCM can be configured alongside APNs or a relay: iOS devices keep
+using APNs or the relay, Android devices use FCM.</p>
+<p>Every push is a data-only, high-priority message with no <code>notification</code>
+block, so the app decides how to render it. Like APNs, it is only a wake-up:
+the text is generic and the app fetches the content from the authenticated
+gateway. The <code>data</code> map holds only strings:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>category</code></td>
+<td><code>SOULACY_APPROVAL</code>, <code>SOULACY_DELIVERY</code>, <code>SOULACY_TRIGGER</code>, ...</td>
+</tr>
+<tr>
+<td><code>title</code>, <code>body</code></td>
+<td>generic alert text</td>
+</tr>
+<tr>
+<td><code>deep_link</code></td>
+<td>for example <code>soulacy://approval/&lt;call_id&gt;</code> or <code>soulacy://delivery/&lt;id&gt;</code></td>
+</tr>
+<tr>
+<td><code>thread_id</code></td>
+<td>grouping key</td>
+</tr>
+<tr>
+<td><code>time_sensitive</code></td>
+<td><code>"true"</code> or <code>"false"</code></td>
+</tr>
+<tr>
+<td><code>delivery_id</code></td>
+<td>present only for inbox deliveries</td>
+</tr>
+</tbody>
+</table>
+<p>Feature-specific keys ride along in the same map, for example <code>call_id</code>,
+<code>agent_id</code>, <code>session_id</code> and <code>tool</code> on approvals. When FCM reports a token as
+unregistered (HTTP 404 or <code>UNREGISTERED</code>), the gateway clears that device's
+push token until the app registers a fresh one.</p>
 <h2 id="lock-screen-approvals">Lock-screen approvals<a class="headerlink" href="#lock-screen-approvals" title="Permanent link">&para;</a></h2>
 <p>When an agent needs your approval for a tool call, every paired phone that
 belongs to the same signed-in user receives a time-sensitive push in the
@@ -5435,9 +5525,9 @@ device command (through the <code>mobile.invoke</code> tool, once the phone has 
 <strong>running</strong> until the person submits or dismisses it, or the command expires,
 so set <code>expires_in_seconds</code> on <code>mobile.invoke</code> (up to 900). The result then
 carries <code>answers</code> keyed by field name and the state of every checklist:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"presented"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"submitted"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"form_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pick"</span><span class="p">,</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w"> </span><span class="nt">"answers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"option"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Beach"</span><span class="p">,</span><span class="w"> </span><span class="nt">"notes"</span><span class="p">:</span><span class="w"> </span><span class="s2">"leave early"</span><span class="p">},</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w"> </span><span class="nt">"checklists"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"Pack"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Passport"</span><span class="p">,</span><span class="w"> </span><span class="nt">"done"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}]}}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span><span class="nt">"presented"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"submitted"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"form_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pick"</span><span class="p">,</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w"> </span><span class="nt">"answers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"option"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Beach"</span><span class="p">,</span><span class="w"> </span><span class="nt">"notes"</span><span class="p">:</span><span class="w"> </span><span class="s2">"leave early"</span><span class="p">},</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w"> </span><span class="nt">"checklists"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"Pack"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Passport"</span><span class="p">,</span><span class="w"> </span><span class="nt">"done"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}]}}</span>
 </span></code></pre></div>
 <p>Limits: 12 components, one form of up to 12 fields, checklists of up to 30
 items, charts of up to 6 series and 60 points. The gateway refuses anything
