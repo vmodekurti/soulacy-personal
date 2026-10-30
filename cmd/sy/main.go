@@ -734,14 +734,21 @@ func buildChatCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if outputJSON {
+				if !json.Valid(resp) {
+					return fmt.Errorf("gateway returned invalid JSON")
+				}
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), string(resp))
+				return err
+			}
 			var result struct {
 				Reply string `json:"reply"`
 			}
 			if err := json.Unmarshal(resp, &result); err != nil {
-				fmt.Println(string(resp))
+				fmt.Fprintln(cmd.OutOrStdout(), string(resp))
 				return nil
 			}
-			fmt.Println(result.Reply)
+			fmt.Fprintln(cmd.OutOrStdout(), result.Reply)
 			return nil
 		},
 	}

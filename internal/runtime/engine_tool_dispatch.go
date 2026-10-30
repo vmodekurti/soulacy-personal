@@ -24,6 +24,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/authconnections"
 	"github.com/soulacy/soulacy/internal/intent"
+	"github.com/soulacy/soulacy/internal/jsoncontract"
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/policy"
@@ -370,6 +371,12 @@ print(result if isinstance(result, str) else json.dumps(result))
 			return "", fmt.Errorf("tool %q requires the 'system' capability in the agent's SOUL.yaml and server-level authorization (allow_system_agents)", call.Name)
 		}
 		return "", fmt.Errorf("tool %q not defined in agent %q", call.Name, def.ID)
+	}
+
+	// Reject malformed calls before Python can perform a side effect. Provider
+	// tool schemas are guidance, not an execution boundary.
+	if err := jsoncontract.Validate(toolDef.Parameters, call.Arguments); err != nil {
+		return "", fmt.Errorf("tool %q arguments violate its schema: %w", call.Name, err)
 	}
 
 	// Serialize arguments to pass as JSON via stdin

@@ -76,29 +76,12 @@ CREATE TABLE IF NOT EXISTS mobile_live_activities (
 // ensureLiveColumns adds the push-to-start token column to phones registered
 // before Live Activities existed. SQLite has no ADD COLUMN IF NOT EXISTS.
 func (s *Store) ensureLiveColumns() error {
-	rows, err := s.db.Query(`PRAGMA table_info(mobile_devices)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt any
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "live_start_token" {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`ALTER TABLE mobile_devices ADD COLUMN live_start_token TEXT NOT NULL DEFAULT ''`)
-	return err
+	return s.ensureDeviceColumn("live_start_token", `ALTER TABLE mobile_devices ADD COLUMN live_start_token TEXT NOT NULL DEFAULT ''`)
 }
+
+// ErrLiveActivityUnsupported is returned when a non-iOS device reports a
+// Live Activity token. Live Activities are an ActivityKit feature.
+var ErrLiveActivityUnsupported = errors.New("live activities are only supported on iOS devices")
 
 // SetLiveStartToken records the phone's push-to-start token. It is called
 // from device registration, so ownership was already checked there.
@@ -119,7 +102,7 @@ func (s *Store) SetLiveStartToken(ctx context.Context, workspaceID, userID, devi
 func (s *Store) LiveStartDevices(ctx context.Context, workspaceID, destination string) ([]Device, error) {
 	workspaceID, destination = normalizeWorkspaceID(workspaceID), normalizeDestination(destination)
 	query := `SELECT id,user_id,name,push_environment,bundle_id,live_start_token FROM mobile_devices
-    WHERE workspace_id=? AND notifications_enabled=1 AND live_start_token<>''`
+    WHERE workspace_id=? AND notifications_enabled=1 AND live_start_token<>'' AND platform='ios'`
 	args := []any{workspaceID}
 	if strings.HasPrefix(destination, "device:") {
 		query += " AND id=?"
@@ -151,6 +134,14 @@ func (s *Store) UpsertLiveActivity(ctx context.Context, workspaceID string, a Li
 	}
 	if err := s.requireDeviceOwner(ctx, workspaceID, a.DeviceID, a.UserID); err != nil {
 		return err
+	}
+	var platform string
+	if err := s.db.QueryRowContext(ctx, `SELECT platform FROM mobile_devices WHERE workspace_id=? AND id=?`,
+		normalizeWorkspaceID(workspaceID), strings.TrimSpace(a.DeviceID)).Scan(&platform); err != nil {
+		return err
+	}
+	if platform != PlatformIOS {
+		return ErrLiveActivityUnsupported
 	}
 	if a.Environment != "development" {
 		a.Environment = "production"

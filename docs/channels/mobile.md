@@ -1,6 +1,6 @@
 # Soulacy Mobile
 
-Soulacy Mobile is an always-on outbound channel for the native iOS app. Delivery first writes the complete result to the workspace's durable SQLite inbox. APNs is only a discreet wake-up signal, so a missing or temporarily failing push service never loses an agent result.
+Soulacy Mobile is an always-on outbound channel for the native iOS and Android apps. Delivery first writes the complete result to the workspace's durable SQLite inbox. APNs and FCM are only discreet wake-up signals, so a missing or temporarily failing push service never loses an agent result.
 
 ## Send a scheduled result
 
@@ -36,6 +36,60 @@ SOULACY_MOBILE_PUSH_RELAY_TOKEN=replace-with-a-secret
 ```
 
 The gateway posts a token, APNs environment, bundle ID, delivery ID, and a `soulacy://delivery/<id>` deep link to `POST <relay>/v1/push`. Notification text is intentionally generic; the sensitive output is fetched from the authenticated gateway after the user opens the app.
+
+## Android (FCM)
+
+The Android app (package `dev.soulacy.android`) registers through the same
+`POST /api/v1/mobile/devices` endpoint with `"platform": "android"`:
+
+```json
+{"id": "<installation-id>", "name": "Pixel 9", "platform": "android",
+ "bundle_id": "dev.soulacy.android", "push_token": "<FCM registration token>",
+ "notifications_enabled": true}
+```
+
+`platform` is `ios` when omitted, and any other value is rejected. For
+Android, `bundle_id` may be omitted but otherwise must be
+`dev.soulacy.android`; `push_token` is the opaque FCM registration token (at
+most 4096 characters, no whitespace) and is stored exactly as sent.
+`push_environment` and `live_start_token` are ignored, and Live Activities
+are never sent to Android devices.
+
+The gateway sends through the FCM HTTP v1 API as a Google service account.
+Create a service-account key with the Firebase Cloud Messaging permission in
+the Firebase project of the Android app, mount the JSON file read-only into
+the container, then set:
+
+```bash
+SOULACY_MOBILE_FCM_CREDENTIALS_FILE=/run/secrets/soulacy-fcm-service-account.json
+# Optional: defaults to project_id from the credentials file.
+SOULACY_MOBILE_FCM_PROJECT_ID=your-firebase-project
+```
+
+Never commit the service-account file or paste it into `.env`. The gateway
+signs its own OAuth2 assertion with the key, exchanges it at the file's
+`token_uri` for an access token, and reuses that token until shortly before
+it expires. FCM can be configured alongside APNs or a relay: iOS devices keep
+using APNs or the relay, Android devices use FCM.
+
+Every push is a data-only, high-priority message with no `notification`
+block, so the app decides how to render it. Like APNs, it is only a wake-up:
+the text is generic and the app fetches the content from the authenticated
+gateway. The `data` map holds only strings:
+
+| Key | Value |
+|---|---|
+| `category` | `SOULACY_APPROVAL`, `SOULACY_DELIVERY`, `SOULACY_TRIGGER`, ... |
+| `title`, `body` | generic alert text |
+| `deep_link` | for example `soulacy://approval/<call_id>` or `soulacy://delivery/<id>` |
+| `thread_id` | grouping key |
+| `time_sensitive` | `"true"` or `"false"` |
+| `delivery_id` | present only for inbox deliveries |
+
+Feature-specific keys ride along in the same map, for example `call_id`,
+`agent_id`, `session_id` and `tool` on approvals. When FCM reports a token as
+unregistered (HTTP 404 or `UNREGISTERED`), the gateway clears that device's
+push token until the app registers a fresh one.
 
 ## Lock-screen approvals
 

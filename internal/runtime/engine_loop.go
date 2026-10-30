@@ -1114,23 +1114,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	if def.LLM.OutputSchema == nil && strings.TrimSpace(finalContent) != "" {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
-	// Structured output enforcement: if the agent has an output_schema, validate
-	// the final reply parses as JSON. On failure, do ONE corrective retry that
-	// asks the model to fix its output (with response_format=json_schema). If
-	// that still fails, we surface whatever we have — the caller can inspect.
-	if def.LLM.OutputSchema != nil && strings.TrimSpace(finalContent) != "" {
-		if _, perr := parseJSONLoose(finalContent); perr != nil {
-			e.sink.Emit(message.Event{
-				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
-				Payload:   map[string]any{"stage": "output-schema", "error": perr.Error(), "retry": true},
-				Timestamp: time.Now().UTC(),
-			})
-			corrected := e.finalSynthesisStructured(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, finalContent, perr)
-			if corrected != "" {
-				finalContent = corrected
-			}
-		}
-	}
 	if strings.TrimSpace(finalContent) == "" {
 		// Recover the best substantive assistant or tool content already gathered.
 		finalContent = bestEffortFinal(chatMsgs)
@@ -1149,6 +1132,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			Payload:   map[string]any{"stage": stage, "error": errText},
 			Timestamp: time.Now().UTC(),
 		})
+	}
+	if def.LLM.OutputSchema != nil {
+		var schemaErr error
+		finalContent, schemaErr = e.enforceOutputSchema(ctx, def, msg, chatMsgs, finalContent)
+		if schemaErr != nil {
+			return message.Message{}, schemaErr
+		}
 	}
 	if !completed {
 		contract.MarkIncomplete(stopReason)
@@ -1198,13 +1188,11 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	// path should surface ReAct/control JSON or provider answer envelopes as the
 	// assistant's visible reply. SanitizeFinalOutput preserves legitimate JSON
 	// payloads and only unwraps known answer/control shapes.
-	if def != nil && def.LLM.OutputSchema != nil {
-		finalContent = reasoning.SanitizeControlOutput(finalContent, nil)
-	} else {
+	if def == nil || def.LLM.OutputSchema == nil {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
 	spokenContent := ""
-	if strings.EqualFold(strings.TrimSpace(msg.Metadata["response.mode"]), "voice") {
+	if (def == nil || def.LLM.OutputSchema == nil) && strings.EqualFold(strings.TrimSpace(msg.Metadata["response.mode"]), "voice") {
 		finalContent, spokenContent = splitVoiceResponse(finalContent)
 	}
 
@@ -1212,7 +1200,9 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	// live reply and durable conversation row contained the chart, but the
 	// in-memory session history captured the pre-chart prose. Revisiting a
 	// conversation through that cache therefore made a chart appear to vanish.
-	finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
+	if def == nil || def.LLM.OutputSchema == nil {
+		finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
+	}
 
 	// Append final assistant response to the in-memory session history
 	sess.mu.Lock()
@@ -1452,7 +1442,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 
 // finalSynthesisStructured re-runs the synthesis with the agent's output schema
 // enforced via the provider's native JSON-mode. Called once when the first
-// pass produced text that didn't parse as JSON.
+// pass failed local schema validation.
 func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Definition, agentID, sessionID string, chatMsgs []llm.ChatMessage, previous string, perr error) string {
 	model := def.LLM.Model
 	if model == "" {

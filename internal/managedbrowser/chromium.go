@@ -62,6 +62,15 @@ func (f *ChromiumFactory) Open(ctx context.Context, req OpenRequest) (Browser, e
 		chromedp.Headless,
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
+		// Present as an ordinary desktop Chrome rather than the default
+		// "HeadlessChrome" string. Replaying a saved session against providers
+		// that fingerprint the client (notably Google) fails outright when the
+		// UA advertises headless automation; a normal UA is a prerequisite for
+		// the restored cookies to be honored. Operator-overridable for tuning.
+		chromedp.UserAgent(browserUserAgent()),
+		// Drop the navigator.webdriver automation flag at the Blink level; the
+		// on-new-document script below masks the residual getter.
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-background-networking", true),
 		chromedp.Flag("disable-sync", true),
@@ -111,6 +120,7 @@ func (f *ChromiumFactory) Open(ctx context.Context, req OpenRequest) (Browser, e
 				return err
 			}
 			_, err := page.AddScriptToEvaluateOnNewDocument(`
+Object.defineProperty(navigator, 'webdriver', { configurable: true, get: () => undefined });
 Object.defineProperty(window, 'open', { configurable: true, value: (url) => { if (url) location.assign(url); return null; } });
 document.addEventListener('DOMContentLoaded', () => document.querySelectorAll('a[target]').forEach(a => a.removeAttribute('target')), { once: true });
 `).Do(c)
@@ -212,6 +222,81 @@ type storageState struct {
 	Origins []storageOrigin `json:"origins"`
 }
 
+// defaultBrowserUserAgent is a current desktop Chrome UA used when the operator
+// has not overridden it. It intentionally omits the "HeadlessChrome" token the
+// headless build advertises by default.
+const defaultBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+	"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+
+// browserUserAgent returns the User-Agent the managed browser presents,
+// honoring SOULACY_BROWSER_USER_AGENT so operators can match the client the
+// session was captured in without a rebuild.
+func browserUserAgent() string {
+	if ua := strings.TrimSpace(os.Getenv("SOULACY_BROWSER_USER_AGENT")); ua != "" {
+		return ua
+	}
+	return defaultBrowserUserAgent
+}
+
+// cookieParam converts a captured storage cookie into a CDP cookie parameter.
+//
+// It preserves the SameSite attribute and expiry (dropping either silently
+// weakens or re-scopes the cookie), and it honors the __Host-/__Secure- cookie
+// name prefixes Chromium enforces on write. The previous restore sent a bare
+// Name/Value/Domain/Path/Secure/HTTPOnly cookie, so a __Host- cookie — which
+// MUST be host-only (no Domain), Secure, and Path=/ — was rejected outright and
+// never restored. Providers whose session depends on such a cookie (Google's
+// among them) then behaved as if signed out despite a "Ready" connection.
+func cookieParam(cookie storageCookie) *network.CookieParam {
+	path := cookie.Path
+	if path == "" {
+		path = "/"
+	}
+	param := &network.CookieParam{
+		Name:     cookie.Name,
+		Value:    cookie.Value,
+		Domain:   cookie.Domain,
+		Path:     path,
+		Secure:   cookie.Secure,
+		HTTPOnly: cookie.HTTPOnly,
+	}
+	param.SameSite = sameSiteType(cookie.SameSite)
+	// SameSite=None is only valid on a Secure cookie.
+	if param.SameSite == network.CookieSameSiteNone {
+		param.Secure = true
+	}
+	switch {
+	case strings.HasPrefix(cookie.Name, "__Host-"):
+		// Host-only: no Domain attribute, Path must be "/", must be Secure.
+		// Addressing by URL lets CDP create the host-scoped cookie correctly.
+		param.URL = "https://" + strings.TrimPrefix(cookie.Domain, ".")
+		param.Domain = ""
+		param.Path = "/"
+		param.Secure = true
+	case strings.HasPrefix(cookie.Name, "__Secure-"):
+		param.Secure = true
+	}
+	if cookie.Expires > 0 {
+		exp := cdp.TimeSinceEpoch(time.Unix(0, int64(cookie.Expires*float64(time.Second))))
+		param.Expires = &exp
+	}
+	return param
+}
+
+// sameSiteType maps a stored SameSite string to the CDP enum. An unknown or
+// empty value returns the zero value, which omits the attribute.
+func sameSiteType(v string) network.CookieSameSite {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "strict":
+		return network.CookieSameSiteStrict
+	case "lax":
+		return network.CookieSameSiteLax
+	case "none":
+		return network.CookieSameSiteNone
+	}
+	return ""
+}
+
 func (b *chromiumBrowser) seed(ctx context.Context, raw []byte, allowed []string) error {
 	if len(raw) == 0 {
 		return nil
@@ -225,11 +310,7 @@ func (b *chromiumBrowser) seed(ctx context.Context, raw []byte, allowed []string
 		if !cookieDomainAllowed(cookie.Domain, allowed) {
 			return ErrOutsideBoundary
 		}
-		path := cookie.Path
-		if path == "" {
-			path = "/"
-		}
-		cookies = append(cookies, &network.CookieParam{Name: cookie.Name, Value: cookie.Value, Domain: cookie.Domain, Path: path, Secure: cookie.Secure, HTTPOnly: cookie.HTTPOnly})
+		cookies = append(cookies, cookieParam(cookie))
 	}
 	if len(cookies) > 0 {
 		if err := chromedp.Run(ctx, chromedp.ActionFunc(func(c context.Context) error { return network.SetCookies(cookies).Do(c) })); err != nil {
