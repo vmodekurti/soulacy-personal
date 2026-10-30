@@ -190,7 +190,31 @@ func (a *App) Run(parent context.Context) error {
 		}
 		return "", fmt.Errorf("MCP secret %q is not set", name)
 	}
-	mcpClient := mcp.New(mcp.Config{Servers: mcpServers, ResolveSecret: resolveMCPSecret}, log)
+	persistMCPSecret := func(ctx context.Context, name, value string) error {
+		return secrets.New(credVault).Set(ctx, name, value)
+	}
+	// Uploaded per-server auth files (cookie jars, token files) live as encrypted
+	// blobs in the vault; materialize them to disk at each server launch.
+	var materializeMCPFiles func(context.Context, string) (map[string][]byte, error)
+	if credVault != nil {
+		materializeMCPFiles = func(ctx context.Context, id string) (map[string][]byte, error) {
+			ns := mcp.FileVaultNamespace(id)
+			names, err := credVault.List(ctx, ns)
+			if err != nil || len(names) == 0 {
+				return nil, err
+			}
+			out := make(map[string][]byte, len(names))
+			for _, name := range names {
+				data, err := credVault.ReadBlob(ctx, ns, name)
+				if err != nil {
+					return nil, err
+				}
+				out[name] = data
+			}
+			return out, nil
+		}
+	}
+	mcpClient := mcp.New(mcp.Config{Servers: mcpServers, ResolveSecret: resolveMCPSecret, PersistSecret: persistMCPSecret, MaterializeFiles: materializeMCPFiles, FileDir: ws.Root}, log)
 	stack.pushClose("mcp-client", mcpClient)
 
 	// ── Knowledge (RAG) — SQLite + sqlite-vec + Ollama embeddings ─────────────

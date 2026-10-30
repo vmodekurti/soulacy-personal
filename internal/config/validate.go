@@ -52,6 +52,7 @@ func (c *Config) Validate() error {
 	dur("auth.jwt_refresh_ttl", c.Auth.JWTRefreshTTL)
 	dur("queue.nats_ack_wait", c.Queue.NATSAckWait)
 	dur("voice.timeout", c.Voice.Timeout)
+	dur("llm.routing.cooldown", c.LLM.Routing.Cooldown)
 	if c.Runtime.ToolTimeout != "" && c.Runtime.Timeouts.Tool != "" && c.Runtime.ToolTimeout != c.Runtime.Timeouts.Tool {
 		errs = append(errs, fmt.Errorf("runtime.tool_timeout (%s) must match runtime.timeouts.tool (%s); prefer runtime.timeouts.tool", c.Runtime.ToolTimeout, c.Runtime.Timeouts.Tool))
 	}
@@ -101,6 +102,39 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("llm.studio.max_build_elapsed must be a nonnegative Go duration"))
 		}
 	}
+	if c.LLM.Routing.MaxFailovers < 0 || c.LLM.Routing.MaxFailovers > 5 {
+		errs = append(errs, fmt.Errorf("llm.routing.max_failovers must be between 0 and 5"))
+	}
+	if c.LLM.Routing.FailureThreshold < 0 {
+		errs = append(errs, fmt.Errorf("llm.routing.failure_threshold must not be negative"))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.LLM.Routing.DefaultMode)) {
+	case "", "auto", "fast", "strong", "pinned":
+	default:
+		errs = append(errs, fmt.Errorf("llm.routing.default_mode: unsupported value %q", c.LLM.Routing.DefaultMode))
+	}
+	switch strings.ToLower(strings.TrimSpace(c.LLM.Routing.Preset)) {
+	case "", "balanced", "fast", "quality", "local":
+	default:
+		errs = append(errs, fmt.Errorf("llm.routing.preset: unsupported value %q", c.LLM.Routing.Preset))
+	}
+	for class, candidates := range c.LLM.Routing.Routes {
+		switch strings.ToLower(strings.TrimSpace(class)) {
+		case "simple", "standard", "complex":
+		default:
+			errs = append(errs, fmt.Errorf("llm.routing.routes: unsupported task class %q", class))
+		}
+		for i, candidate := range candidates {
+			if strings.TrimSpace(candidate.Provider) == "" {
+				errs = append(errs, fmt.Errorf("llm.routing.routes.%s[%d].provider is required", class, i))
+			}
+		}
+	}
+	for i, candidate := range c.LLM.Routing.Fallbacks {
+		if strings.TrimSpace(candidate.Provider) == "" {
+			errs = append(errs, fmt.Errorf("llm.routing.fallbacks[%d].provider is required", i))
+		}
+	}
 
 	// --- Runtime numeric bounds ---
 	// max_concurrent_sessions sizes the worker pool; <=0 would mean "no workers"
@@ -129,6 +163,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Runtime.MaxHistoryTurns < 0 {
 		errs = append(errs, fmt.Errorf("runtime.max_history_turns: %d must not be negative", c.Runtime.MaxHistoryTurns))
+	}
+	if c.Observability.MaxContentBytes < 0 || c.Observability.MaxContentBytes > 4*1024*1024 {
+		errs = append(errs, fmt.Errorf("observability.max_content_bytes must be between 0 and 4194304"))
 	}
 	for field, value := range map[string]int{
 		"runtime.default_budget.max_tokens":    c.Runtime.DefaultBudget.MaxTokens,

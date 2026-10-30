@@ -62,11 +62,11 @@
     text-align: left;
     color: inherit;
   }
-  .caret { flex: none; color: var(--text-muted, #8b93ab); font-size: 11px; width: 12px; }
-  .collapsible-title { font-weight: 600; font-size: 13px; color: var(--text, #e6e9ef); }
+  .caret { flex: none; color: var(--text-muted, var(--sl-text-faint)); font-size: 11px; width: 12px; }
+  .collapsible-title { font-weight: 600; font-size: 13px; color: var(--text, var(--sl-text)); }
   .collapsible-sub {
     font-size: 12px;
-    color: var(--text-muted, #8b93ab);
+    color: var(--text-muted, var(--sl-text-faint));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

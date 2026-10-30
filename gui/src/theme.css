@@ -8,6 +8,31 @@ html[data-theme="light"] #app {
   background: var(--sl-bg);
 }
 
+/* The theme contract is shared by every route. Components choose a semantic
+   role instead of carrying their own copy of a navy or white palette. */
+body {
+  color: var(--sl-text);
+  background: var(--sl-bg);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+:is(button, input, select, textarea) { font: inherit; }
+:is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--sl-accent) 28%, transparent);
+  outline-offset: 2px;
+}
+
+:is(code, pre) {
+  color: var(--sl-code-text);
+  background: var(--sl-code-bg);
+}
+
+::selection {
+  color: var(--sl-text);
+  background: var(--sl-accent-soft-strong);
+}
+
 html[data-theme="light"] ::selection {
   color: #202636;
   background: rgba(91, 92, 226, .18);
@@ -18,7 +43,7 @@ html[data-theme="light"] *::-webkit-scrollbar { width: 10px; height: 10px; }
 html[data-theme="light"] *::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #cfd5e2; background-clip: padding-box; }
 html[data-theme="light"] *::-webkit-scrollbar-track { background: transparent; }
 
-html[data-theme="light"] :is(code, pre) { color: #35405a; }
+html[data-theme="light"] :is(code, pre) { color: var(--sl-code-text); }
 
 html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) h1,
 html[data-theme="light"] :is(.page-header, .panel-header, .section-head, .card-head) h2,
@@ -116,6 +141,10 @@ html[data-theme="light"] :is(
   .eyebrow, .meta, .description, .subtitle, .optional
 ) { color: var(--sl-text-faint) !important; }
 
+html[data-theme="light"] :is(.success, .ok, .ready) { color: var(--sl-success); }
+html[data-theme="light"] :is(.warning, .warn) { color: var(--sl-warning); }
+html[data-theme="light"] :is(.danger, .error, .failed) { color: var(--sl-danger); }
+
 html[data-theme="light"] :is(.backdrop, .drawer-backdrop, .sheet-backdrop) {
   background: rgba(44, 52, 70, .26) !important;
   backdrop-filter: blur(8px);
@@ -131,6 +160,15 @@ html[data-theme="light"] :is(.drawer, .side-panel, .detail-panel, .history-panel
 
 html[data-theme="light"] :is(a, .linkish) { color: var(--sl-accent-ink); }
 html[data-theme="light"] hr { border-color: var(--sl-line); }
+
+html[data-theme="dark"] * { scrollbar-color: var(--sl-line-strong) transparent; }
+html[data-theme="dark"] *::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--sl-line-strong);
+  background-clip: padding-box;
+}
 
 /* Workspace pages should follow the available viewport, including ultrawide
    displays. A fixed content ceiling made data-dense screens occupy less than

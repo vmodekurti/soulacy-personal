@@ -23,6 +23,19 @@ type Completer interface {
 	Complete(ctx context.Context, model, system, user string, params PhaseParams) (string, error)
 }
 
+type routerPhaseKey struct{}
+
+func withRouterPhase(ctx context.Context, phase string) context.Context {
+	return context.WithValue(ctx, routerPhaseKey{}, phase)
+}
+
+// RouterPhaseFromContext lets the runtime attach phase-aware routing metadata
+// without widening the stable Completer seam.
+func RouterPhaseFromContext(ctx context.Context) string {
+	phase, _ := ctx.Value(routerPhaseKey{}).(string)
+	return phase
+}
+
 // RouterBackend implements LLMBackend by delegating to a Completer.
 type RouterBackend struct {
 	comp Completer
@@ -55,7 +68,7 @@ func (b *RouterBackend) Think(ctx context.Context, req ThinkRequest) (ThinkRespo
 	if params.MaxTokens <= 0 {
 		params.MaxTokens = agent.DefaultMaxOutputTokens
 	}
-	raw, err := b.comp.Complete(ctx, b.ThinkModel, system, user, params)
+	raw, err := b.comp.Complete(withRouterPhase(ctx, "think"), b.ThinkModel, system, user, params)
 	if err != nil {
 		return ThinkResponse{}, fmt.Errorf("reasoning/router: Think: %w", err)
 	}
@@ -77,7 +90,7 @@ func (b *RouterBackend) Plan(ctx context.Context, systemPrompt, taskInput string
 	if params.MaxTokens <= 0 {
 		params.MaxTokens = agent.DefaultMaxOutputTokens
 	}
-	raw, err := b.comp.Complete(ctx, b.PlanReflectModel, system, "Task: "+taskInput, params)
+	raw, err := b.comp.Complete(withRouterPhase(ctx, "plan"), b.PlanReflectModel, system, "Task: "+taskInput, params)
 	if err != nil {
 		return Plan{}, fmt.Errorf("reasoning/router: Plan: %w", err)
 	}
@@ -104,7 +117,7 @@ func (b *RouterBackend) Reflect(ctx context.Context, req ReflectRequest) (Reflec
 	if params.MaxTokens <= 0 {
 		params.MaxTokens = 2048
 	}
-	raw, err := b.comp.Complete(ctx, b.PlanReflectModel, system, user, params)
+	raw, err := b.comp.Complete(withRouterPhase(ctx, "reflect"), b.PlanReflectModel, system, user, params)
 	if err != nil {
 		return ReflectResponse{}, fmt.Errorf("reasoning/router: Reflect: %w", err)
 	}

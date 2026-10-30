@@ -140,6 +140,12 @@ func (s *Server) safeConfigView() fiber.Map {
 			"allowed_providers": cfg.LLM.AllowedProviders,
 			"allowed_models":    cfg.LLM.AllowedModels,
 			"providers":         providers,
+			"routing": fiber.Map{
+				"enabled": cfg.LLM.Routing.Enabled, "default_mode": cfg.LLM.Routing.DefaultMode,
+				"preset": cfg.LLM.Routing.Preset, "max_failovers": cfg.LLM.Routing.MaxFailovers,
+				"failure_threshold": cfg.LLM.Routing.FailureThreshold, "cooldown": cfg.LLM.Routing.Cooldown,
+				"routes": cfg.LLM.Routing.Routes, "fallbacks": cfg.LLM.Routing.Fallbacks,
+			},
 			"studio": fiber.Map{
 				"provider":           cfg.LLM.Studio.Provider,
 				"model":              cfg.LLM.Studio.Model,
@@ -155,6 +161,10 @@ func (s *Server) safeConfigView() fiber.Map {
 			"level":  cfg.Log.Level,
 			"format": cfg.Log.Format,
 			"file":   cfg.Log.File,
+		},
+		"observability": fiber.Map{
+			"capture_llm_content": cfg.Observability.CaptureLLMContent,
+			"max_content_bytes":   cfg.Observability.MaxContentBytes,
 		},
 		"search": fiber.Map{
 			"provider": cfg.Search.Provider,
@@ -357,6 +367,7 @@ type PatchableConfig struct {
 			Provider string `json:"provider" yaml:"provider"`
 			Model    string `json:"model" yaml:"model"`
 		} `json:"reasoner" yaml:"reasoner"`
+		Routing *RoutingPatch `json:"routing" yaml:"routing"`
 	} `json:"llm" yaml:"llm"`
 
 	Log *struct {
@@ -364,6 +375,11 @@ type PatchableConfig struct {
 		Format string `json:"format" yaml:"format"`
 		File   string `json:"file" yaml:"file"`
 	} `json:"log" yaml:"log"`
+
+	Observability *struct {
+		CaptureLLMContent *bool `json:"capture_llm_content" yaml:"capture_llm_content"`
+		MaxContentBytes   *int  `json:"max_content_bytes" yaml:"max_content_bytes"`
+	} `json:"observability" yaml:"observability"`
 
 	// Search configures the built-in web_search tool. APIKey of "***" is the
 	// redacted placeholder echoed by the GUI and is skipped on write so it
@@ -471,6 +487,17 @@ type PatchableConfig struct {
 	} `json:"memory" yaml:"memory"`
 }
 
+type RoutingPatch struct {
+	Enabled          bool                                  `json:"enabled" yaml:"enabled"`
+	DefaultMode      string                                `json:"default_mode" yaml:"default_mode"`
+	Preset           string                                `json:"preset" yaml:"preset"`
+	MaxFailovers     int                                   `json:"max_failovers" yaml:"max_failovers"`
+	FailureThreshold int                                   `json:"failure_threshold" yaml:"failure_threshold"`
+	Cooldown         string                                `json:"cooldown" yaml:"cooldown"`
+	Routes           map[string][]config.LLMRouteCandidate `json:"routes" yaml:"routes"`
+	Fallbacks        []config.LLMRouteCandidate            `json:"fallbacks" yaml:"fallbacks"`
+}
+
 // PatchableAdaptiveMemory mirrors config.AdaptiveMemoryConfig with pointer
 // fields so "explicitly false" survives the round trip.
 type PatchableAdaptiveMemory struct {
@@ -513,6 +540,16 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 	}
+	if patch.LLM != nil && patch.LLM.Routing != nil {
+		normalized := normalizeRoutingPatch(*patch.LLM.Routing, s.cfg.LLM.Routing)
+		patch.LLM.Routing = &normalized
+		if err := validateRoutingPatch(*patch.LLM.Routing, s.cfg.LLM.Providers); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+	if patch.Observability != nil && patch.Observability.MaxContentBytes != nil && (*patch.Observability.MaxContentBytes < 0 || *patch.Observability.MaxContentBytes > 4*1024*1024) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "observability.max_content_bytes must be between 0 and 4194304"})
+	}
 
 	// Read current file
 	current, err := readRawConfig(s.cfgPath)
@@ -530,6 +567,22 @@ func (s *Server) handlePatchConfig(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to write config file: " + err.Error(),
 		})
+	}
+	if patch.LLM != nil && patch.LLM.Routing != nil && s.cfg != nil {
+		r := patch.LLM.Routing
+		s.cfg.LLM.Routing = config.LLMRoutingConfig{Enabled: r.Enabled, DefaultMode: r.DefaultMode, Preset: r.Preset, MaxFailovers: r.MaxFailovers, FailureThreshold: r.FailureThreshold, Cooldown: r.Cooldown, Routes: r.Routes, Fallbacks: r.Fallbacks}
+		s.hotApplyRouting()
+	}
+	if patch.Observability != nil && s.cfg != nil {
+		if patch.Observability.CaptureLLMContent != nil {
+			s.cfg.Observability.CaptureLLMContent = *patch.Observability.CaptureLLMContent
+		}
+		if patch.Observability.MaxContentBytes != nil {
+			s.cfg.Observability.MaxContentBytes = *patch.Observability.MaxContentBytes
+		}
+		if s.engine != nil {
+			s.engine.SetLLMObservability(s.cfg.Observability.CaptureLLMContent, s.cfg.Observability.MaxContentBytes)
+		}
 	}
 
 	// Keep the in-memory view in step for the sections the running process
@@ -743,6 +796,10 @@ func (s *Server) ReloadConfig() error {
 
 	s.cfg = newCfg
 	s.hotApplyRunBudgets()
+	s.hotApplyRouting()
+	if s.engine != nil {
+		s.engine.SetLLMObservability(newCfg.Observability.CaptureLLMContent, newCfg.Observability.MaxContentBytes)
+	}
 	if s.adaptiveRebuild != nil {
 		if err := s.adaptiveRebuild(newCfg.Memory.Adaptive); err != nil {
 			s.log.Warn("adaptive memory reload failed", zap.Error(err))
@@ -960,6 +1017,17 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 			rs["provider"] = patch.LLM.Reasoner.Provider
 			rs["model"] = patch.LLM.Reasoner.Model
 		}
+		if patch.LLM.Routing != nil {
+			routing := getOrCreateMap(llm, "routing")
+			routing["enabled"] = patch.LLM.Routing.Enabled
+			routing["default_mode"] = patch.LLM.Routing.DefaultMode
+			routing["preset"] = patch.LLM.Routing.Preset
+			routing["max_failovers"] = max(0, min(5, patch.LLM.Routing.MaxFailovers))
+			routing["failure_threshold"] = max(1, patch.LLM.Routing.FailureThreshold)
+			routing["cooldown"] = patch.LLM.Routing.Cooldown
+			routing["routes"] = patch.LLM.Routing.Routes
+			routing["fallbacks"] = patch.LLM.Routing.Fallbacks
+		}
 	}
 	if patch.Search != nil {
 		sr := getOrCreateMap(dst, "search")
@@ -1058,6 +1126,15 @@ func applyPatch(dst map[string]any, patch PatchableConfig) {
 		}
 		if patch.Log.File != "" {
 			lg["file"] = patch.Log.File
+		}
+	}
+	if patch.Observability != nil {
+		observability := getOrCreateMap(dst, "observability")
+		if patch.Observability.CaptureLLMContent != nil {
+			observability["capture_llm_content"] = *patch.Observability.CaptureLLMContent
+		}
+		if patch.Observability.MaxContentBytes != nil {
+			observability["max_content_bytes"] = max(0, min(4*1024*1024, *patch.Observability.MaxContentBytes))
 		}
 	}
 	if len(patch.AgentDirs) > 0 {

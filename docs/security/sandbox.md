@@ -44,13 +44,47 @@ process after the chokepoint, but their targets pass the same symlink-aware
 workspace containment policy used by all filesystem tools. They cannot write
 outside configured roots.
 
-## Ordinary Python tools: resource limits only
+## Ordinary Python tools: resource limits by default
 
 Agent/plugin Python execution still uses the `__exec-sandbox` POSIX rlimit
-wrapper. It caps CPU, address space, open descriptors, and single-file size and
-filters the environment. This wrapper is a resource-exhaustion guard, not a
-filesystem or network boundary. Use a Docker executor for untrusted ordinary
-Python tools as well.
+wrapper by default. It caps CPU, address space, open descriptors, and
+single-file size and filters the environment. This wrapper is a
+resource-exhaustion guard, not a filesystem or network boundary.
+
+For untrusted agent tools, select the Docker backend per agent:
+
+```yaml
+# SOUL.yaml
+execution:
+  backend: docker
+```
+
+Each tool call then runs in a disposable container with the same hardened
+profile as privileged builtins: read-only root, all capabilities dropped,
+`no-new-privileges`, no network by default, a `noexec` tmpfs `/tmp` (also
+`HOME`), and the `runtime.sandbox` CPU, memory, PID, file-descriptor and
+file-size caps. No gateway environment is forwarded, and only the volumes you
+list are mounted. If Docker is unreachable, the call fails; it never falls back
+to the host.
+
+```yaml
+# config.yaml
+executor:
+  docker_image: python:3.12-slim
+  docker_network: none        # an explicit choice; "none" also blocks cloud metadata
+  docker_user: auto           # auto (gateway uid:gid) | image | "uid:gid"
+  docker_volumes:
+    - /srv/agent-data:/data:rw
+```
+
+`docker_user: auto` runs the tool as the gateway's own user, so it is not
+root inside the container and files it writes to a volume belong to you. Use
+`image` to keep the image's default user.
+
+Current limits: tools defined with `python_file` load from a host path, so
+they only work in Docker if that directory is mounted at the same path. Plugin
+tools don't honour `execution.backend` yet. Both are planned; see
+[the design memo](../CONTAINER_SANDBOX_DESIGN.md).
 
 On macOS `RLIMIT_AS` is advisory; on non-Unix systems the rlimit wrapper is a
 no-op. These limitations do not weaken the Docker boundary for privileged

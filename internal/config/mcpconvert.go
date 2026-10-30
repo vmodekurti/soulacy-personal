@@ -49,6 +49,7 @@ func (c MCPServerConfig) ToMCP(managedRoot string) mcp.ServerConfig {
 			ClientSecretRef: c.Auth.ClientSecretRef,
 			Scopes:          c.Auth.Scopes,
 			Audience:        c.Auth.Audience,
+			Resource:        c.Auth.Resource,
 		},
 		Timeout:        c.Timeout,
 		PublicOnly:     c.PublicOnly,

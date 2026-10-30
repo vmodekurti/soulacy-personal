@@ -35,6 +35,12 @@ const FullNamePrefix = "mcp__"
 type Config struct {
 	Servers       map[string]ServerConfig
 	ResolveSecret func(context.Context, string) (string, error)
+	PersistSecret func(context.Context, string, string) error
+	// MaterializeFiles returns the uploaded files (name → content) for a stdio
+	// server, decrypted from the vault. Optional; when nil, no files are
+	// provisioned. FileDir is the base directory they are written under.
+	MaterializeFiles func(context.Context, string) (map[string][]byte, error)
+	FileDir          string
 }
 
 // ServerConfig describes one MCP server connection.
@@ -73,6 +79,7 @@ type AuthConfig struct {
 	ClientSecretRef string   `json:"client_secret_ref,omitempty"`
 	Scopes          []string `json:"scopes,omitempty"`
 	Audience        string   `json:"audience,omitempty"`
+	Resource        string   `json:"resource,omitempty"`
 }
 
 // Tool is one tool exposed by an MCP server.
@@ -175,11 +182,14 @@ type server struct {
 
 // Client is the top-level MCP client managing multiple servers.
 type Client struct {
-	log           *zap.Logger
-	servers       []*server
-	addLocks      map[string]*sync.Mutex // per-id AddServer serialization
-	mu            sync.RWMutex
-	resolveSecret func(context.Context, string) (string, error)
+	log              *zap.Logger
+	servers          []*server
+	addLocks         map[string]*sync.Mutex // per-id AddServer serialization
+	mu               sync.RWMutex
+	resolveSecret    func(context.Context, string) (string, error)
+	persistSecret    func(context.Context, string, string) error
+	materializeFiles func(context.Context, string) (map[string][]byte, error)
+	fileDir          string
 }
 
 // New connects to every configured server. Failures are logged but never fatal —
@@ -191,7 +201,7 @@ type Client struct {
 // no longer blocks every other MCP — and by extension the rest of the
 // gateway boot. Total wait is capped by the slowest server, not the sum.
 func New(cfg Config, log *zap.Logger) *Client {
-	c := &Client{log: log, resolveSecret: cfg.ResolveSecret}
+	c := &Client{log: log, resolveSecret: cfg.ResolveSecret, persistSecret: cfg.PersistSecret, materializeFiles: cfg.MaterializeFiles, fileDir: cfg.FileDir}
 	ids := make([]string, 0, len(cfg.Servers))
 	for id := range cfg.Servers {
 		ids = append(ids, id)
@@ -231,13 +241,24 @@ func (c *Client) start(s *server) error {
 	transport := strings.ToLower(s.cfg.Transport)
 	switch transport {
 	case "", "stdio":
-		tx, err := newStdio(s.cfg, c.resolveSecret, c.log.With(zap.String("mcp_server", s.id)))
+		cfg := s.cfg
+		if dir, err := c.provisionFiles(s.id); err != nil {
+			return err
+		} else if dir != "" {
+			env := make(map[string]string, len(cfg.Env)+1)
+			for k, v := range cfg.Env {
+				env[k] = v
+			}
+			env[FileDirEnv] = dir
+			cfg.Env = env
+		}
+		tx, err := newStdio(cfg, c.resolveSecret, c.log.With(zap.String("mcp_server", s.id)))
 		if err != nil {
 			return err
 		}
 		s.tx = tx
 	case "http", "https":
-		s.tx = newHTTP(s.cfg, c.resolveSecret)
+		s.tx = newHTTP(s.cfg, c.resolveSecret, c.persistSecret)
 	default:
 		return fmt.Errorf("unknown transport %q (expected stdio or http)", s.cfg.Transport)
 	}

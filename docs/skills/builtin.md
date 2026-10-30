@@ -23,6 +23,7 @@ marker, and the Skills page shows them with a **built-in** badge.
 | `travel-planner` | options, itinerary, official entry requirements and day-of reminders; booking stays with the provider |
 | `money-check-in` | read-only spending, subscriptions and unusual charges from a finance adapter or exported statement |
 | `meeting-prep` | who you are meeting, where things were left, what is owed, and what to ask |
+| `photo-album` | a curated, captioned album from photos you pick in Google Photos: a story-style HTML page, optionally a real Google Photos album ([setup](photo-album.md)) |
 
 Every skill has a `references/eval.md` with a handful of prompts and the
 expected behaviour, so it can be checked by hand (and, later, automatically).

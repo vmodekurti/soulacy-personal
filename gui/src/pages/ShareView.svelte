@@ -71,30 +71,30 @@
 </div>
 
 <style>
-  .share-page { max-width: 820px; margin: 0 auto; padding: 28px 20px 60px; color: #e6e8f5; }
-  .share-header { border-bottom: 1px solid #232743; padding-bottom: 14px; margin-bottom: 18px; }
-  .brand { display: flex; align-items: center; gap: 9px; color: #e6e8f5; font-weight: 750; letter-spacing: -.04em; font-size: 1.15rem; }
+  .share-page { max-width: 820px; margin: 0 auto; padding: 28px 20px 60px; color: var(--sl-text); }
+  .share-header { border-bottom: 1px solid var(--sl-surface-muted); padding-bottom: 14px; margin-bottom: 18px; }
+  .brand { display: flex; align-items: center; gap: 9px; color: var(--sl-text); font-weight: 750; letter-spacing: -.04em; font-size: 1.15rem; }
   .share-header h1 { margin: 6px 0 2px; font-size: 1.4rem; }
-  .meta { color: #8f96bb; font-size: .82rem; }
-  .ro-badge { display: inline-block; margin-top: 8px; font-size: .68rem; color: #a7d3ff;
+  .meta { color: var(--sl-text-faint); font-size: .82rem; }
+  .ro-badge { display: inline-block; margin-top: 8px; font-size: .68rem; color: var(--sl-info);
     background: rgba(80,140,255,.12); border: 1px solid rgba(80,140,255,.3); border-radius: 999px; padding: 2px 10px; }
-  .state { color: #8f96bb; padding: 40px 0; text-align: center; }
-  .state.err { color: #ff9a9a; }
+  .state { color: var(--sl-text-faint); padding: 40px 0; text-align: center; }
+  .state.err { color: var(--sl-danger); }
   .thread { display: flex; flex-direction: column; gap: 16px; }
-  .msg { border: 1px solid #232743; border-radius: 10px; background: #111426; padding: 12px 14px; }
+  .msg { border: 1px solid var(--sl-surface-muted); border-radius: 10px; background: var(--sl-surface-muted); padding: 12px 14px; }
   .msg.role-user { background: #141834; }
   .msg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
-  .role { font-weight: 600; font-size: .78rem; color: #cfd3ee; }
-  .msg.role-assistant .role { color: #72d9aa; }
-  .ts { color: #6b7196; font-size: .7rem; }
+  .role { font-weight: 600; font-size: .78rem; color: var(--sl-text); }
+  .msg.role-assistant .role { color: var(--sl-success); }
+  .ts { color: var(--sl-text-faint); font-size: .7rem; }
   .bubble { font-size: .9rem; line-height: 1.5; word-break: break-word; }
-  .atts { margin-top: 8px; color: #8f96bb; font-size: .74rem; }
-  .share-footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #232743; color: #8f96bb; font-size: .78rem; }
+  .atts { margin-top: 8px; color: var(--sl-text-faint); font-size: .74rem; }
+  .share-footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--sl-surface-muted); color: var(--sl-text-faint); font-size: .78rem; }
   .share-footer a { color: var(--sl-accent-hover); }
   /* Basic markdown element spacing for the read-only bubble. */
-  .bubble.md :global(pre) { background: #0d0f1c; padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+  .bubble.md :global(pre) { background: var(--sl-surface-inset); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
   .bubble.md :global(code) { font-family: ui-monospace, Menlo, monospace; font-size: .82em; }
   .bubble.md :global(a) { color: var(--sl-accent-hover); }
   .bubble.md :global(table) { border-collapse: collapse; }
-  .bubble.md :global(td), .bubble.md :global(th) { border: 1px solid #2a2f52; padding: 4px 8px; }
+  .bubble.md :global(td), .bubble.md :global(th) { border: 1px solid var(--sl-line); padding: 4px 8px; }
 </style>

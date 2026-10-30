@@ -27,9 +27,9 @@ import (
 	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
+	sdkhooks "github.com/soulacy/soulacy/sdk/hooks"
 )
 
-// EventSink receives structured events as they happen during agent execution.
 func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message.Message, err error) {
 	metadata := llm.CallMetadataFromContext(ctx)
 	if metadata.Subject == "" {
@@ -88,6 +88,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	var runProvider, runModel, runStrategy string
 	defer func() {
 		contractSnapshot, recordedOutcome, success, degraded := completeTaskContract(contract, &reply, err, runOutcome)
+		_ = e.runLifecycleHook(context.WithoutCancel(ctx), sdkhooks.RunAfter, msg.AgentID, msg.SessionID, lifecycleAfterData(recordedOutcome, err))
 		if collector := taskContractCollectorFrom(ctx); collector != nil {
 			*collector = contractSnapshot
 		}
@@ -140,6 +141,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		}
 		e.finishLearningRun(ctx, msg, reply, success)
 	}()
+	if hookErr := e.runLifecycleHook(ctx, sdkhooks.RunBefore, msg.AgentID, msg.SessionID, map[string]any{"trigger": metadata.Trigger, "source": metadata.Source}); hookErr != nil {
+		return reply, hookErr
+	}
 
 	// S2.1 — Panic isolation. Channel- and cron-driven runs execute in bare
 	// worker goroutines (internal/app/wire_subsystems.go) that are NOT behind
@@ -248,7 +252,8 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// actionable message ("provider 'anthropic' not in allowed_providers
 	// [ollama]") instead of a downstream "401 credit balance" or "404
 	// model not found" failure that looks like the model's fault.
-	if !providerAllowed(def.LLM.AllowedProviders, def.LLM.Provider) {
+	routingActive := e.llmRouter.SmartRoutingEnabled(def.LLM.Routing)
+	if !routingActive && !providerAllowed(def.LLM.AllowedProviders, def.LLM.Provider) {
 		errMsg := fmt.Sprintf(
 			"engine: llm provider %q not in allowed_providers %v for agent %q "+
 				"(set llm.allowed_providers in SOUL.yaml to widen, or change "+
@@ -267,7 +272,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		})
 		return message.Message{}, fmt.Errorf("%s", errMsg)
 	}
-	if !providerAllowed(def.LLM.AllowedModels, def.LLM.Model) {
+	if !routingActive && !providerAllowed(def.LLM.AllowedModels, def.LLM.Model) {
 		errMsg := fmt.Sprintf(
 			"engine: llm model %q not in allowed_models %v for agent %q",
 			def.LLM.Model, def.LLM.AllowedModels, msg.AgentID)
@@ -281,6 +286,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 		})
 		return message.Message{}, fmt.Errorf("%s", errMsg)
 	}
+	ctx = e.withRoutingObservability(ctx, def, msg)
 
 	preparation, prepareErr := e.prepareModelDefinition(ctx, def)
 	if prepareErr != nil {
@@ -376,13 +382,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	// Retrieve or create session
 	sess := e.getOrCreateSession(msg.SessionID, msg.AgentID)
 
-	// PERF-1: mark the session as actively in use for the duration of this
-	// Handle call so the eviction sweep never reclaims a mid-conversation
+	// Mark the session active so eviction never reclaims a mid-conversation
 	// session. lastAccess was already bumped by getOrCreateSession.
 	sess.mu.Lock()
 	sess.inUse++
 	sess.mu.Unlock()
 	defer func() {
+		redactAgensiSkillHistory(sess)
 		sess.mu.Lock()
 		sess.inUse--
 		sess.lastAccess = time.Now().UTC()
@@ -747,13 +753,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			}
 			inputBudget = ctxLimit - reserveOut
 		}
-		if trimmed, dropped := compactMessagesToFit(chatMsgs, tools, inputBudget); dropped > 0 {
-			chatMsgs = trimmed
-			e.log.Warn("engine: trimmed history to fit context window",
-				zap.String("agent", msg.AgentID),
-				zap.String("model", model),
-				zap.Int("dropped_messages", dropped),
-				zap.Int("input_budget_tokens", inputBudget))
+		chatMsgs, err = e.prepareContextForCall(ctx, def, msg, routingPhase(turn, len(tools)), chatMsgs, tools, ctxLimit, inputBudget)
+		if err != nil {
+			return reply, err
 		}
 
 		reasoningEffort := def.LLM.ReasoningEffort
@@ -773,6 +775,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			PresencePenalty:  def.LLM.PresencePenalty,
 			FrequencyPenalty: def.LLM.FrequencyPenalty,
 		}
+		req.Routing.Phase = routingPhase(turn, len(tools))
 		// Tool-choice constraint applies ONLY on turn 1 AND only if we didn't
 		// already auto-delegate above (otherwise we'd force the same tool a
 		// second time after its result is already in context). After turn 1 the
@@ -813,7 +816,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 
 		llmCtx, llmCancel := context.WithTimeout(ctx, e.effectiveLLMTimeout())
 		defer llmCancel() // panic/early-return guard; active streams own this deadline until drained.
-		resp, err := e.llmRouter.Complete(llmCtx, def.LLM.Provider, req)
+		resp, err := e.completeLLM(llmCtx, def.LLM.Provider, req)
 		if err != nil || resp == nil || resp.Stream == nil {
 			llmCancel()
 		}
@@ -830,22 +833,21 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				usedCalls++
 				retryCtx, retryCancel := context.WithTimeout(ctx, e.effectiveLLMTimeout())
 				defer retryCancel()
-				resp, err = e.llmRouter.Complete(retryCtx, def.LLM.Provider, req)
+				resp, err = e.completeLLM(retryCtx, def.LLM.Provider, req)
 				if err != nil || resp == nil || resp.Stream == nil {
 					retryCancel()
 				}
 				llmCtx, llmCancel = retryCtx, retryCancel
 			}
 		}
-		// Prometheus: per-call duration + outcome counter + token counts.
-		// (PRODUCTION_AUDIT → MED/Observability)
-		llmProviderLabel := def.LLM.Provider
+		llmProviderLabel, metricModel := selectedRouteLabels(resp, def.LLM.Provider, model)
+		runProvider, runModel = llmProviderLabel, metricModel
 		if llmProviderLabel == "" {
 			llmProviderLabel = "(default)"
 		}
-		metrics.LLMCallDuration.WithLabelValues(llmProviderLabel, model).Observe(time.Since(llmStart).Seconds())
+		metrics.LLMCallDuration.WithLabelValues(llmProviderLabel, metricModel).Observe(time.Since(llmStart).Seconds())
 		if err != nil {
-			metrics.LLMCallsTotal.WithLabelValues(llmProviderLabel, model, "error").Inc()
+			metrics.LLMCallsTotal.WithLabelValues(llmProviderLabel, metricModel, "error").Inc()
 			// Story 3 — name the clock that fired. A bare "context deadline
 			// exceeded" leaves the operator guessing whether it was the agent's
 			// run_timeout, a tool timeout, or provider slowness. When the run
@@ -856,10 +858,10 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 				if errors.Is(ctxErr, context.Canceled) {
 					outErr = fmt.Errorf("engine: run cancelled (shutdown or caller cancel) during llm call: %w", err)
 				} else {
-					outErr = fmt.Errorf("engine: agent run_timeout exceeded while waiting on the LLM provider %q (model %q); raise the agent's run_timeout or check provider latency: %w", llmProviderLabel, model, err)
+					outErr = fmt.Errorf("engine: agent run_timeout exceeded while waiting on the LLM provider %q (model %q); raise the agent's run_timeout or check provider latency: %w", llmProviderLabel, metricModel, err)
 				}
 			} else if errors.Is(err, context.DeadlineExceeded) {
-				outErr = fmt.Errorf("engine: llm timeout for provider %q model %q after %s: %w", llmProviderLabel, model, e.effectiveLLMTimeout(), err)
+				outErr = fmt.Errorf("engine: llm timeout for provider %q model %q after %s: %w", llmProviderLabel, metricModel, e.effectiveLLMTimeout(), err)
 			}
 			outErr = failures.annotate(outErr)
 			e.sink.Emit(message.Event{
@@ -869,7 +871,7 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			})
 			return message.Message{}, outErr
 		}
-		metrics.LLMCallsTotal.WithLabelValues(llmProviderLabel, model, "success").Inc()
+		metrics.LLMCallsTotal.WithLabelValues(llmProviderLabel, metricModel, "success").Inc()
 		// Drain the streaming channel, delivering tokens to the caller's
 		// callback and accumulating them into resp.Content. If the provider
 		// didn't open a stream (non-streaming path or tool-call turn),
@@ -936,26 +938,26 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			resp.Content = ""
 			resp.ToolCalls = []message.ToolCall{genieActionPlanCall(rawGoal)}
 		}
-		// Usage for streams is final only after the provider channel closes.
-		// Recording and run-budget accumulation therefore happen after draining.
 		if resp.InputTokens > 0 {
-			metrics.LLMInputTokens.WithLabelValues(llmProviderLabel, model).Add(float64(resp.InputTokens))
+			metrics.LLMInputTokens.WithLabelValues(llmProviderLabel, metricModel).Add(float64(resp.InputTokens))
 		}
 		if resp.OutputTokens > 0 {
-			metrics.LLMOutputTokens.WithLabelValues(llmProviderLabel, model).Add(float64(resp.OutputTokens))
+			metrics.LLMOutputTokens.WithLabelValues(llmProviderLabel, metricModel).Add(float64(resp.OutputTokens))
 		}
-		e.recordUsage(ctx, msg.AgentID, msg.SessionID, llmProviderLabel, model,
+		e.recordUsage(ctx, msg.AgentID, msg.SessionID, llmProviderLabel, metricModel,
 			resp.InputTokens, resp.OutputTokens)
 		usedTokens += resp.InputTokens + resp.OutputTokens + resp.ReasoningTokens + resp.ToolUsePromptTokens
 
 		e.sink.Emit(message.Event{
 			Type: "llm.result", AgentID: msg.AgentID, SessionID: msg.SessionID,
 			Payload: map[string]any{
-				"model":         model,
-				"input_tokens":  resp.InputTokens,
-				"output_tokens": resp.OutputTokens,
-				"duration_ms":   time.Since(llmStart).Milliseconds(),
-				"tool_calls":    len(resp.ToolCalls),
+				"provider":        llmProviderLabel,
+				"model":           metricModel,
+				"requested_model": model,
+				"input_tokens":    resp.InputTokens,
+				"output_tokens":   resp.OutputTokens,
+				"duration_ms":     time.Since(llmStart).Milliseconds(),
+				"tool_calls":      len(resp.ToolCalls),
 			},
 			Timestamp: time.Now().UTC(),
 		})
@@ -1112,23 +1114,6 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	if def.LLM.OutputSchema == nil && strings.TrimSpace(finalContent) != "" {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
-	// Structured output enforcement: if the agent has an output_schema, validate
-	// the final reply parses as JSON. On failure, do ONE corrective retry that
-	// asks the model to fix its output (with response_format=json_schema). If
-	// that still fails, we surface whatever we have — the caller can inspect.
-	if def.LLM.OutputSchema != nil && strings.TrimSpace(finalContent) != "" {
-		if _, perr := parseJSONLoose(finalContent); perr != nil {
-			e.sink.Emit(message.Event{
-				Type: "warn", AgentID: msg.AgentID, SessionID: msg.SessionID,
-				Payload:   map[string]any{"stage": "output-schema", "error": perr.Error(), "retry": true},
-				Timestamp: time.Now().UTC(),
-			})
-			corrected := e.finalSynthesisStructured(ctx, def, msg.AgentID, msg.SessionID, chatMsgs, finalContent, perr)
-			if corrected != "" {
-				finalContent = corrected
-			}
-		}
-	}
 	if strings.TrimSpace(finalContent) == "" {
 		// Recover the best substantive assistant or tool content already gathered.
 		finalContent = bestEffortFinal(chatMsgs)
@@ -1147,6 +1132,13 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 			Payload:   map[string]any{"stage": stage, "error": errText},
 			Timestamp: time.Now().UTC(),
 		})
+	}
+	if def.LLM.OutputSchema != nil {
+		var schemaErr error
+		finalContent, schemaErr = e.enforceOutputSchema(ctx, def, msg, chatMsgs, finalContent)
+		if schemaErr != nil {
+			return message.Message{}, schemaErr
+		}
 	}
 	if !completed {
 		contract.MarkIncomplete(stopReason)
@@ -1196,13 +1188,11 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	// path should surface ReAct/control JSON or provider answer envelopes as the
 	// assistant's visible reply. SanitizeFinalOutput preserves legitimate JSON
 	// payloads and only unwraps known answer/control shapes.
-	if def != nil && def.LLM.OutputSchema != nil {
-		finalContent = reasoning.SanitizeControlOutput(finalContent, nil)
-	} else {
+	if def == nil || def.LLM.OutputSchema == nil {
 		finalContent = reasoning.SanitizeFinalOutput(finalContent, nil)
 	}
 	spokenContent := ""
-	if strings.EqualFold(strings.TrimSpace(msg.Metadata["response.mode"]), "voice") {
+	if (def == nil || def.LLM.OutputSchema == nil) && strings.EqualFold(strings.TrimSpace(msg.Metadata["response.mode"]), "voice") {
 		finalContent, spokenContent = splitVoiceResponse(finalContent)
 	}
 
@@ -1210,7 +1200,9 @@ func (e *Engine) finalizeReply(ctx context.Context, def *agent.Definition, sess 
 	// live reply and durable conversation row contained the chart, but the
 	// in-memory session history captured the pre-chart prose. Revisiting a
 	// conversation through that cache therefore made a chart appear to vanish.
-	finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
+	if def == nil || def.LLM.OutputSchema == nil {
+		finalContent = appendCollectedCharts(finalContent, chartSinkFrom(ctx))
+	}
 
 	// Append final assistant response to the in-memory session history
 	sess.mu.Lock()
@@ -1336,9 +1328,6 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 	if model == "" {
 		model = "(provider default)"
 	}
-	// Pre-size to exact capacity so the trailing append doesn't trigger a
-	// second re-allocation/copy on long conversations. (PRODUCTION_AUDIT
-	// → MED/Engine — minor but free.)
 	msgs := make([]llm.ChatMessage, 0, len(chatMsgs)+1)
 	msgs = append(msgs, chatMsgs...)
 	instruction := "Now write your final response directly to the user using the information already gathered above. " +
@@ -1356,7 +1345,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		Timestamp: time.Now().UTC(),
 	})
 	start := time.Now()
-	resp, err := e.llmRouter.Complete(ctx, def.LLM.Provider, llm.CompletionRequest{
+	resp, err := e.completeLLM(ctx, def.LLM.Provider, llm.CompletionRequest{
 		Model:            def.LLM.Model,
 		Messages:         msgs,
 		Temperature:      def.LLM.Temperature,
@@ -1366,6 +1355,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		PresencePenalty:  def.LLM.PresencePenalty,
 		FrequencyPenalty: def.LLM.FrequencyPenalty,
 		Stream:           def.StreamReply,
+		Routing:          llm.RoutingHint{Phase: "final-synthesis", TaskClass: "complex"},
 		// Tools intentionally omitted so the model must answer in text.
 	})
 	if err != nil {
@@ -1383,6 +1373,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 		Type: "llm.result", AgentID: agentID, SessionID: sessionID,
 		Payload: map[string]any{
 			"model": model, "input_tokens": resp.InputTokens, "output_tokens": resp.OutputTokens,
+			"provider": selectedRouteProvider(resp, def.LLM.Provider), "selected_model": selectedRouteModel(resp, model),
 			"duration_ms": time.Since(start).Milliseconds(), "turn": "final-synthesis",
 		},
 		Timestamp: time.Now().UTC(),
@@ -1407,7 +1398,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 				"Never reveal analysis, planning, chain-of-thought, prompt interpretation, or raw tool data. " +
 				"Start with the answer itself.",
 		})
-		retryResp, retryErr := e.llmRouter.Complete(ctx, def.LLM.Provider, llm.CompletionRequest{
+		retryResp, retryErr := e.completeLLM(ctx, def.LLM.Provider, llm.CompletionRequest{
 			Model: def.LLM.Model, Messages: retryMsgs, Temperature: def.LLM.Temperature,
 			TopP: def.LLM.TopP, MaxTokens: def.LLM.MaxTokens, ReasoningEffort: def.LLM.ReasoningEffort,
 			PresencePenalty: def.LLM.PresencePenalty, FrequencyPenalty: def.LLM.FrequencyPenalty,
@@ -1430,7 +1421,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 			Content: "Output ONLY the final report as plain text. Do not call tools. " +
 				"Do not include any <think> blocks or analysis — write the user-facing answer now.",
 		})
-		retryResp, retryErr := e.llmRouter.Complete(ctx, def.LLM.Provider, llm.CompletionRequest{
+		retryResp, retryErr := e.completeLLM(ctx, def.LLM.Provider, llm.CompletionRequest{
 			Model:            def.LLM.Model,
 			Messages:         retryMsgs,
 			Temperature:      def.LLM.Temperature,
@@ -1439,6 +1430,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 			ReasoningEffort:  def.LLM.ReasoningEffort,
 			PresencePenalty:  def.LLM.PresencePenalty,
 			FrequencyPenalty: def.LLM.FrequencyPenalty,
+			Routing:          llm.RoutingHint{Phase: "final-synthesis-retry", TaskClass: "complex"},
 			// Tools still omitted so the model must answer in text.
 		})
 		if retryErr == nil && strings.TrimSpace(retryResp.Content) != "" {
@@ -1450,7 +1442,7 @@ func (e *Engine) finalSynthesis(ctx context.Context, def *agent.Definition, agen
 
 // finalSynthesisStructured re-runs the synthesis with the agent's output schema
 // enforced via the provider's native JSON-mode. Called once when the first
-// pass produced text that didn't parse as JSON.
+// pass failed local schema validation.
 func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Definition, agentID, sessionID string, chatMsgs []llm.ChatMessage, previous string, perr error) string {
 	model := def.LLM.Model
 	if model == "" {
@@ -1472,7 +1464,7 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 		Payload:   map[string]any{"provider": def.LLM.Provider, "model": model, "turn": "structured-retry"},
 		Timestamp: time.Now().UTC(),
 	})
-	resp, err := e.llmRouter.Complete(ctx, def.LLM.Provider, llm.CompletionRequest{
+	resp, err := e.completeLLM(ctx, def.LLM.Provider, llm.CompletionRequest{
 		Model:            def.LLM.Model,
 		Messages:         msgs,
 		Temperature:      def.LLM.Temperature,
@@ -1480,6 +1472,7 @@ func (e *Engine) finalSynthesisStructured(ctx context.Context, def *agent.Defini
 		MaxTokens:        def.LLM.MaxTokens,
 		ResponseFormat:   "json_schema",
 		JSONSchema:       def.LLM.OutputSchema,
+		Routing:          llm.RoutingHint{Phase: "structured-repair", TaskClass: "complex"},
 		ReasoningEffort:  def.LLM.ReasoningEffort,
 		PresencePenalty:  def.LLM.PresencePenalty,
 		FrequencyPenalty: def.LLM.FrequencyPenalty,

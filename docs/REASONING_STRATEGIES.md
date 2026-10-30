@@ -96,8 +96,9 @@ tool loop. Agents without a `reasoning:` block are untouched.
 ## Fallback semantics
 
 - `auto` (or empty) → keyword heuristic picks `plan_execute` or `react`.
-- Unknown name, factory error, or nil strategy → **ReAct fallback**. A typo'd
-  SOUL.yaml never bricks an agent; the run completes with the default loop.
+- Unknown names and factory errors are explicit configuration failures. No
+  tools run under a different strategy than the operator selected. Empty or
+  `auto` still resolves to a built-in strategy.
 
 ## Conformance
 

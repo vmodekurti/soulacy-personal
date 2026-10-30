@@ -1,0 +1,127 @@
+{
+  "type": "object",
+  "properties": {
+    "action_benefit_points": {
+      "type": "number",
+      "minimum": 0
+    },
+    "action_cost_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "affected_tenants": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "baseline_error_rate_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "budget_remaining_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "chosen_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "credits_usd": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "customer_message_draft": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duration_minutes": {
+      "type": "number",
+      "minimum": 0
+    },
+    "external_actions_executed": {
+      "type": "boolean"
+    },
+    "forbidden_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "incident_error_rate_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "incident_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "increase_percentage_points": {
+      "type": "number",
+      "minimum": 0
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "root_cause_confidence": {
+      "type": "string",
+      "minLength": 1
+    },
+    "severity": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "total_credit_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "error_rate_multiplier": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "action_benefit_points",
+    "action_cost_usd",
+    "affected_tenants",
+    "baseline_error_rate_pct",
+    "budget_remaining_usd",
+    "chosen_actions",
+    "credits_usd",
+    "customer_message_draft",
+    "duration_minutes",
+    "error_rate_multiplier",
+    "external_actions_executed",
+    "forbidden_actions",
+    "incident_error_rate_pct",
+    "incident_id",
+    "increase_percentage_points",
+    "owner",
+    "rationale",
+    "root_cause_confidence",
+    "severity",
+    "source_ids",
+    "total_credit_usd"
+  ],
+  "additionalProperties": false
+}

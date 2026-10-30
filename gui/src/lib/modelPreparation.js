@@ -3,6 +3,7 @@ const text = (v, max) => typeof v === 'string' && v.length <= max
 const limit = v => Number.isInteger(v) && v >= 0 && v <= 16 * 1024 * 1024
 export function validatePreparation(value, agentID) {
   const p = value?.profile
+  const r = value?.routing
   if (value?.agent_id !== agentID || value?.goal_preserved !== true || !text(value.strategy, 128) ||
       !p || !text(p.provider, 256) || !text(p.model, 256) ||
       !['provider_metadata', 'adapter', 'unknown'].includes(p.source) ||
@@ -10,7 +11,8 @@ export function validatePreparation(value, agentID) {
       !['chat', 'native_tools', 'json_mode', 'reasoning', 'vision'].every(k => supports.has(p[k])) ||
       !['context_tokens', 'input_tokens', 'output_tokens'].every(k => limit(p[k])) || !limit(value.max_output_tokens) ||
       ![value.approach, value.warnings].every(list => Array.isArray(list) && list.length <= 12 && list.every(v => text(v, 1000))) ||
-      (value.blocked_reason != null && !text(value.blocked_reason, 1000))) throw new Error('Invalid model preparation. Refresh before relying on it.')
+      (value.blocked_reason != null && !text(value.blocked_reason, 1000)) ||
+      (r?.mode && (!text(r.mode, 32) || !text(r.task_class, 32) || !Array.isArray(r.candidates) || r.candidates.length > 32 || !r.candidates.every(v => text(v, 520))))) throw new Error('Invalid model preparation. Refresh before relying on it.')
   return value
 }
 export function supportLabel(value) { return value === 'supported' ? 'Supported' : value === 'unsupported' ? 'Not supported' : 'Not reported' }

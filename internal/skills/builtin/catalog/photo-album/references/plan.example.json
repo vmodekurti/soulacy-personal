@@ -1,0 +1,29 @@
+{
+  "title": "Salt, Sun & Sandcastles",
+  "subtitle": "Our July 2025 week by the sea, the best of it",
+  "theme": "cozy",
+  "cover": "fake-007",
+  "sections": [
+    {
+      "heading": "Morning tide",
+      "intro": "Early starts, cold water and the first finds of the week.",
+      "items": [
+        {"id": "fake-007", "caption": "Tide pools before breakfast", "feature": true},
+        {"id": "fake-002", "caption": "The waves that kept us honest"},
+        {"id": "fake-010", "caption": "Someone found the sand first"}
+      ]
+    },
+    {
+      "heading": "Golden hour",
+      "intro": "Long evenings on the pier and the deck.",
+      "items": [
+        {"id": "fake-006", "caption": "That light", "feature": true},
+        {"id": "fake-004", "caption": "Sunset over the pier"},
+        {"id": "fake-005", "caption": "Dinner, outside, every night"},
+        {"id": "fake-011", "caption": "The lighthouse on the walk home"}
+      ]
+    }
+  ],
+  "footer": "Made with Soulacy from photos you picked",
+  "publish": {"captions_as_descriptions": false}
+}

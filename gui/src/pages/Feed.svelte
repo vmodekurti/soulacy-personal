@@ -499,9 +499,9 @@
   .metric-icon.blue { color: #1769aa; background: color-mix(in srgb, #45a9f5 15%, transparent); }
   .metric-icon.amber { color: #9a5b00; background: color-mix(in srgb, #f7b84b 18%, transparent); }
   .metric-icon.green { color: #087b52; background: color-mix(in srgb, #26b77a 15%, transparent); }
-  :global(:root[data-theme="dark"]) .metric-icon.blue { color: #83c8ff; }
+  :global(:root[data-theme="dark"]) .metric-icon.blue { color: var(--sl-info); }
   :global(:root[data-theme="dark"]) .metric-icon.amber { color: #ffd083; }
-  :global(:root[data-theme="dark"]) .metric-icon.green { color: #7ee2b8; }
+  :global(:root[data-theme="dark"]) .metric-icon.green { color: var(--sl-success); }
   .metric > span:nth-child(2) { min-width: 0; display: grid; }
   .metric small { color: var(--f-faint); font-size: .72rem; font-weight: 650; }
   .metric strong { margin-top: .08rem; font-size: 1.08rem; }

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 const app = readFileSync(fileURLToPath(new URL('./App.svelte', import.meta.url)), 'utf8')
 const websiteAccess = readFileSync(fileURLToPath(new URL('./pages/WebsiteAccess.svelte', import.meta.url)), 'utf8')
+const agents = readFileSync(fileURLToPath(new URL('./pages/Agents.svelte', import.meta.url)), 'utf8')
+const studioTheme = readFileSync(fileURLToPath(new URL('./lib/studio/studio.css', import.meta.url)), 'utf8')
 
 function tokenBlock(pattern) {
   const match = app.match(pattern)
@@ -44,6 +46,7 @@ describe('workspace color contrast', () => {
       expectReadable(tokens, 'sl-text-dim', 'sl-surface')
       expectReadable(tokens, 'sl-text-faint', 'sl-surface-raised')
       expectReadable(tokens, 'sl-accent-ink', 'sl-surface')
+      expectReadable(tokens, 'sl-code-text', 'sl-code-bg')
     })
 
     it(`${name} theme keeps controls and primary actions distinguishable`, () => {
@@ -58,5 +61,19 @@ describe('workspace color contrast', () => {
     expect(websiteAccess).toContain('background: var(--sl-surface)')
     expect(websiteAccess).toContain('.facts span { color: var(--sl-text-dim)')
     expect(websiteAccess).toContain('.primary { color: var(--sl-on-accent); background: var(--sl-accent-fill)')
+  })
+
+  it('keeps dense Agent Builder sections on theme-aware surfaces', () => {
+    expect(agents).toContain('.learning-card {\n    background: var(--sl-surface-inset)')
+    expect(agents).toContain('.tools-empty {\n    background: var(--sl-surface-inset)')
+    expect(agents).toContain('.tool-card {\n    background: var(--sl-surface-inset)')
+    expect(agents).not.toMatch(/background:\s*#(?:0e1020|1c1f35|2a2f4a)\b/i)
+  })
+
+  it('lets Workflow Studio follow the portal theme', () => {
+    expect(studioTheme).toContain('--bg: var(--sl-bg)')
+    expect(studioTheme).toContain('--bg-elev: var(--sl-surface)')
+    expect(studioTheme).toContain('--text: var(--sl-text)')
+    expect(studioTheme).toContain('--ok: var(--sl-success)')
   })
 })
