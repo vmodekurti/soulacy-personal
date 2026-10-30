@@ -787,3 +787,62 @@ func TestEnsureScopesWidensCompanionKeysOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateThenCloseWaitsForLastUsedUpdate guards against the background
+// last_used_at write outliving Close. Before Close waited for it, the write
+// could run against a closed DB or recreate keys.db-wal/-shm while
+// t.TempDir() was being removed ("directory not empty" cleanup flakes).
+// Run with -race -count=50 to shake out ordering issues.
+func TestValidateThenCloseWaitsForLastUsedUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keys.db")
+	ctx := context.Background()
+
+	s, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	plaintext, _, err := s.Create(ctx, "close-race", []string{"read"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := s.Validate(ctx, plaintext); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Close must have waited for the update, so it is visible on reopen.
+	s2, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	keys, err := s2.List(ctx, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(keys) != 1 || keys[0].LastUsedAt == nil {
+		t.Fatalf("last_used_at not persisted before Close returned: %+v", keys)
+	}
+
+	// Validate after Close must not start a write against the closed DB.
+	if _, err := s2.Validate(ctx, plaintext); err != nil {
+		t.Fatalf("Validate (s2): %v", err)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("Close (s2): %v", err)
+	}
+	if _, err := s2.Validate(ctx, plaintext); err == nil {
+		t.Fatal("Validate on closed store: want error, got nil")
+	}
+
+	// Nothing may recreate files in the dir once Close has returned.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll after Close: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("dir reappeared after Close: %v", err)
+	}
+}
