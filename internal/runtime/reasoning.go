@@ -419,6 +419,14 @@ func (e *Engine) handleWithReasoning(ctx context.Context, def *agent.Definition,
 		})
 	}
 
+	if def.LLM.OutputSchema != nil {
+		var schemaErr error
+		finalContent, schemaErr = e.enforceOutputSchema(ctx, def, msg, e.buildContext(def, sess, msg), finalContent)
+		if schemaErr != nil {
+			return message.Message{}, schemaErr
+		}
+	}
+
 	var finalMetadata map[string]string
 	if !result.Confident {
 		finalMetadata = map[string]string{message.MetaReasoningDegraded: "true", message.MetaReasoningSteps: strconv.Itoa(len(result.Steps)), message.MetaOutcome: "incomplete"}
