@@ -89,10 +89,58 @@ sy registry add https://www.skills.sh/
 sy skill install vercel-labs/skills/find-skills
 ```
 
-The install resolves through the skills.sh directory API, fetches the
-skill's file tree, runs the local safety pipeline, shows any partner
-security audit alongside Soulacy's own report at the consent prompt, and
-hot-loads the skill on approval.
+The install resolves the id through skills.sh and fetches the skill's
+files (from the directory API when you have a token, otherwise from the
+skill's GitHub repository; see below). It then runs the local safety
+pipeline, shows any partner security audit next to Soulacy's own report at
+the consent prompt, and hot-loads the skill once you approve.
+
+## skills.sh authentication
+
+Since October 2026 the skills.sh API (search, leaderboard and skill detail)
+answers `HTTP 401 authentication_required` unless the request carries a
+**Vercel OIDC token** (`Authorization: Bearer <VERCEL_OIDC_TOKEN>`, see
+[skills.sh/docs/api](https://skills.sh/docs/api#authentication)). Those
+tokens are issued to apps deployed on Vercel. Only the audit endpoint
+(`/api/v1/skills/audit/{id}`) is still public.
+
+Soulacy keeps skills.sh usable without a token:
+
+| Operation | Without a token | With a token |
+|---|---|---|
+| `sy skill install owner/repo/skill` | Shallow-clones `github.com/owner/repo` and installs the directory whose `SKILL.md` matches the skill (directory name or frontmatter `name`; a repo with a single `SKILL.md` installs that one) | Files come inline from the directory API |
+| Search | Matches against the public catalog on the skills.sh homepage (popular skills only) | Full API search |
+| Partner audits in the consent prompt | ✓ (public endpoint) | ✓ |
+| `sy registry probe https://www.skills.sh/` | Detected as `skillssh`, with samples from the public catalog and a note that the API is token-gated | Detected via the API |
+| Well-known ids (`domain/skill`) | Not installable; the error explains why and what to do instead | ✓ |
+
+The git fallback installs the repository's default branch (`HEAD`). As with
+any git source the package is unsigned, so `--allow-unverified` is still
+required.
+
+To use the API directly, provide a token in either of two ways:
+
+```bash
+# picked up automatically for skills.sh sources with no auth_headers
+export VERCEL_OIDC_TOKEN=…   # e.g. from `vercel link && vercel env pull` (valid ~12h)
+```
+
+```yaml
+registries:
+  - id: skills.sh
+    type: skillssh
+    base_url: https://www.skills.sh
+    priority: 50
+    auth_headers:
+      Authorization: "Bearer <token>"   # sent verbatim; no env expansion
+```
+
+If a skill can't be reached either way, install it straight from its
+repository directory instead:
+
+```bash
+sy skill install https://github.com/vercel-labs/skills/tree/main/skills/find-skills
+```
 
 ## Adding sources from the GUI
 
