@@ -105,7 +105,7 @@
 
   .kv-header {
     display: grid; grid-template-columns: 1fr 1fr 2rem; gap: .5rem;
-    font-size: .65rem; color: #555a7a; text-transform: uppercase;
+    font-size: .65rem; color: var(--sl-text-faint); text-transform: uppercase;
     letter-spacing: .08em; font-weight: 600; padding: 0 .15rem;
   }
   .kv-row {
@@ -113,17 +113,17 @@
     align-items: center;
   }
   .kv-row input {
-    background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
-    color: #e8eaf6; font-size: .82rem; padding: .35rem .55rem;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 6px;
+    color: var(--sl-text); font-size: .82rem; padding: .35rem .55rem;
     font-family: monospace;
   }
   .kv-row input:focus { border-color: var(--sl-accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 15%, transparent); }
   .kv-remove {
-    background: none; border: 1px solid rgba(240,96,96,.3); color: #f06060;
+    background: none; border: 1px solid color-mix(in srgb, var(--sl-danger) 30%, transparent); color: var(--sl-danger);
     border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1;
     padding: 0 .35rem; height: 1.85rem;
   }
-  .kv-remove:hover { background: rgba(240,96,96,.1); }
+  .kv-remove:hover { background: color-mix(in srgb, var(--sl-danger) 10%, transparent); }
 
   .kv-add {
     align-self: flex-start; background: color-mix(in srgb, var(--sl-accent) 12%, transparent); color: var(--sl-accent-hover);

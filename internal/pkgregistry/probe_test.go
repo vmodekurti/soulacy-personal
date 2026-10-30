@@ -114,3 +114,30 @@ func TestProbe_RefusesNonHTTPSchemes(t *testing.T) {
 		t.Errorf("scheme-less: %v", err)
 	}
 }
+
+func TestProbe_DetectsAuthGatedSkillsSh(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"authentication_required","message":"Pass a Vercel OIDC token"}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<script>self.__next_f.push([1,"{\"initialSkills\":[{\"source\":\"acme/skills\",\"skillId\":\"web-audit\",\"name\":\"web-audit\",\"installs\":42}]}"])</script>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rep, err := Probe(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if rep.Kind != SourceKindSkillsSh || rep.Suggested == nil || rep.Suggested.Type != "skillssh" {
+		t.Fatalf("report = %+v, want skillssh", rep)
+	}
+	if len(rep.Samples) != 1 || rep.Samples[0] != "acme/skills/web-audit" {
+		t.Errorf("samples = %v", rep.Samples)
+	}
+	if !strings.Contains(rep.Detail, "Vercel OIDC token") {
+		t.Errorf("detail = %q, want auth guidance", rep.Detail)
+	}
+}

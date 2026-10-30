@@ -224,22 +224,22 @@
   .card.clickable { cursor: pointer; transition: border-color .12s; }
   .card.clickable:hover { border-color: var(--accent); }
   .card.status-ready { border-left-color: #36d399; }
-  .card.status-needs-attention { border-left-color: #f5a524; }
-  .card.status-risky { border-left-color: #ff6b81; }
+  .card.status-needs-attention { border-left-color: var(--sl-warning); }
+  .card.status-risky { border-left-color: var(--sl-danger); }
   .card-empty { color: var(--text-muted); font-style: italic; font-size: 12px; border-left-color: var(--border); }
   .card-top { display: flex; align-items: center; gap: 8px; }
   .card-status { font-size: 12px; width: 16px; text-align: center; }
   .status-ready .card-status { color: #36d399; }
-  .status-needs-attention .card-status { color: #f5a524; }
-  .status-risky .card-status { color: #ff6b81; }
+  .status-needs-attention .card-status { color: var(--sl-warning); }
+  .status-risky .card-status { color: var(--sl-danger); }
   .card-label { font-size: 13px; font-weight: 600; color: var(--text); }
   .card-test { font-size: 10px; padding: 1px 7px; border-radius: 999px; }
   .card-test.pass { background: rgba(54,211,153,.16); color: #36d399; }
-  .card-test.fail { background: rgba(255,107,129,.16); color: #ff6b81; }
-  .card-testerr { margin-top: 4px; font-size: 11px; color: #ff6b81; }
+  .card-test.fail { background: rgba(255,107,129,.16); color: var(--sl-danger); }
+  .card-testerr { margin-top: 4px; font-size: 11px; color: var(--sl-danger); }
   .card-risk { margin-left: auto; font-size: 10px; padding: 1px 7px; border-radius: 999px; }
-  .risk-medium { background: rgba(245,165,36,.16); color: #f5a524; }
-  .risk-high { background: rgba(255,107,129,.16); color: #ff6b81; }
+  .risk-medium { background: rgba(245,165,36,.16); color: var(--sl-warning); }
+  .risk-high { background: rgba(255,107,129,.16); color: var(--sl-danger); }
   .card-reasons { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: var(--text-muted); }
   .card-actions { display: flex; gap: 12px; margin-top: 6px; }
   .card-more { background: none; border: none; color: var(--accent); font-size: 11px; cursor: pointer; padding: 0; }
@@ -254,14 +254,14 @@
   .add-step-input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); font-size: 13px; }
   .add-step-msg { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
   .suggest { border: 1px solid var(--border); border-radius: 12px; background: rgba(108,140,255,.06); }
-  .suggest-head { padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--accent, #6c8cff); }
+  .suggest-head { padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--accent, var(--sl-accent-ink)); }
   .suggest-list { margin: 0; padding: 0 14px 12px; list-style: none; display: flex; flex-direction: column; gap: 8px; }
   .suggest-item { display: flex; align-items: center; gap: 12px; }
   .suggest-body { display: flex; flex-direction: column; gap: 2px; }
   .suggest-why { font-size: 11px; color: var(--text-muted); }
   .suggest-item .btn { margin-left: auto; white-space: nowrap; }
-  .attention { border: 1px solid #f5a524; border-radius: 12px; background: rgba(245,165,36,.06); }
-  .attention-head { padding: 10px 14px; font-weight: 600; font-size: 13px; color: #f5a524; }
+  .attention { border: 1px solid var(--sl-warning); border-radius: 12px; background: rgba(245,165,36,.06); }
+  .attention-head { padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--sl-warning); }
   .attention-list { margin: 0; padding: 0 14px 12px 32px; font-size: 12px; color: var(--text); }
   .attention-list li { margin-bottom: 3px; }
   .review { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); }
@@ -270,8 +270,8 @@
   .rv { display: flex; gap: 10px; font-size: 12px; }
   .rv-k { flex: 0 0 80px; color: var(--text-muted); text-transform: uppercase; font-size: 10px; letter-spacing: .5px; padding-top: 2px; }
   .rv-v { color: var(--text); }
-  .rv-risk .rv-k, .rv-risk .rv-v { color: #ff6b81; }
-  .flag { font-size: 10px; padding: 0 6px; border-radius: 999px; background: rgba(255,107,129,.16); color: #ff6b81; }
+  .rv-risk .rv-k, .rv-risk .rv-v { color: var(--sl-danger); }
+  .flag { font-size: 10px; padding: 0 6px; border-radius: 999px; background: rgba(255,107,129,.16); color: var(--sl-danger); }
   .review-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 14px 14px; }
-  .review-warn { font-size: 11px; color: #f5a524; margin-right: auto; }
+  .review-warn { font-size: 11px; color: var(--sl-warning); margin-right: auto; }
 </style>

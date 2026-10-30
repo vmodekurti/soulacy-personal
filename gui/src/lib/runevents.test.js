@@ -106,6 +106,10 @@ describe('naming', () => {
 
   it('recognises only the events worth showing', () => {
     expect(isRunEvent(ev('tool.call'))).toBe(true)
+    expect(isRunEvent(ev('context.compacted'))).toBe(true)
+    expect(isRunEvent(ev('llm.route.fallback'))).toBe(true)
+    expect(eventTitle(ev('context.compacted'))).toContain('Compacted context')
+    expect(eventDetail(ev('llm.route.fallback', { fallback_from: 'one/a', fallback_to: 'two/b', fallback_reason: 'overloaded' }))).toContain('one/a → two/b')
     expect(isRunEvent(ev('assistant.delta'))).toBe(false)
     expect(isRunEvent(null)).toBe(false)
   })

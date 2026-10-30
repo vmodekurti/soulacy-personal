@@ -22,7 +22,7 @@ func fullMCPServerConfig() MCPServerConfig {
 			Type: "bearer", Header: "Authorization", Scheme: "Bearer",
 			SecretRef: "ref", TokenURL: "https://example.invalid/token",
 			ClientID: "id", ClientSecretRef: "secret-ref",
-			Scopes: []string{"read"}, Audience: "aud",
+			Scopes: []string{"read"}, Audience: "aud", Resource: "resource",
 		},
 		Timeout:        30 * time.Second,
 		PublicOnly:     true,

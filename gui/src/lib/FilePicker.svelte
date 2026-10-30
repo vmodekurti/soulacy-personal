@@ -136,30 +136,30 @@
   .row { display: flex; gap: .4rem; align-items: stretch; }
   .row input[type="text"] {
     flex: 1;
-    background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
-    color: #e8eaf6; font-size: .85rem; padding: .45rem .6rem;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 6px;
+    color: var(--sl-text); font-size: .85rem; padding: .45rem .6rem;
     font-family: monospace;
   }
   .row input[type="text"]:focus { outline: none; border-color: var(--sl-accent); }
 
   .browse {
     background: color-mix(in srgb, var(--sl-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent);
-    color: #ada8ff; border-radius: 6px; cursor: pointer;
+    color: var(--sl-accent-ink); border-radius: 6px; cursor: pointer;
     font-size: .78rem; padding: 0 .7rem; white-space: nowrap;
   }
   .browse:hover { background: color-mix(in srgb, var(--sl-accent) 25%, transparent); }
 
   .dropdown {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
-    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 8px;
+    background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 8px;
     max-height: 300px; overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0,0,0,.45);
     padding: .35rem;
   }
   .search {
     width: 100%; box-sizing: border-box; margin-bottom: .3rem;
-    background: #0e1020; border: 1px solid #2a2f4a; border-radius: 6px;
-    color: #e8eaf6; font-size: .8rem; padding: .35rem .5rem;
+    background: var(--sl-surface-inset); border: 1px solid var(--sl-line); border-radius: 6px;
+    color: var(--sl-text); font-size: .8rem; padding: .35rem .5rem;
   }
   .search:focus { outline: none; border-color: var(--sl-accent); }
 
@@ -171,6 +171,6 @@
   }
   .item:hover, .item.active { background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
   .item-label { font-family: monospace; color: var(--sl-accent-hover); font-size: .82rem; }
-  .item-value { color: #9aa0c0; font-size: .72rem; font-family: monospace; }
+  .item-value { color: var(--sl-text-dim); font-size: .72rem; font-family: monospace; }
   .item-desc  { color: var(--sl-text-faint); font-size: .72rem; }
 </style>

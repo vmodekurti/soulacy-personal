@@ -17,6 +17,7 @@ type ModelPreparation struct {
 	Limits          ExecutionLimits  `json:"limits"`
 	AgentID         string           `json:"agent_id"`
 	Profile         llm.ModelProfile `json:"profile"`
+	Routing         llm.RouteTrace   `json:"routing"`
 	Strategy        string           `json:"strategy"`
 	Approach        []string         `json:"approach"`
 	Warnings        []string         `json:"warnings"`
@@ -44,7 +45,7 @@ func (e *Engine) resolveExecutionModel(def *agent.Definition) error {
 	if provider == "" {
 		provider = e.llmRouter.DefaultProvider()
 	}
-	if !providerAllowed(def.LLM.AllowedProviders, provider) {
+	if !e.llmRouter.SmartRoutingEnabled(def.LLM.Routing) && !providerAllowed(def.LLM.AllowedProviders, provider) {
 		return fmt.Errorf("llm provider %q not in allowed_providers %v", provider, def.LLM.AllowedProviders)
 	}
 	if e.reasoningBackendFactory != nil && e.llmRouter.Provider(def.LLM.Provider) == nil {
@@ -76,7 +77,7 @@ func (e *Engine) PrepareAgentModel(ctx context.Context, def *agent.Definition) (
 	if err := e.resolveExecutionModel(cp); err != nil {
 		return ModelPreparation{}, err
 	}
-	if !providerAllowed(cp.LLM.AllowedProviders, cp.LLM.Provider) || !providerAllowed(cp.LLM.AllowedModels, cp.LLM.Model) {
+	if !e.llmRouter.SmartRoutingEnabled(cp.LLM.Routing) && (!providerAllowed(cp.LLM.AllowedProviders, cp.LLM.Provider) || !providerAllowed(cp.LLM.AllowedModels, cp.LLM.Model)) {
 		return ModelPreparation{}, fmt.Errorf("selected provider/model is outside this agent's allowlists")
 	}
 	return e.prepareModelDefinition(ctx, cp)
@@ -91,18 +92,43 @@ func (e *Engine) prepareModelDefinition(ctx context.Context, def *agent.Definiti
 		result.Limits = e.executionLimits(def)
 		return result, nil
 	}
-	p := llm.UnknownModelProfile(def.LLM.Provider, def.LLM.Model)
-	if e.llmRouter != nil && e.llmRouter.Provider(def.LLM.Provider) != nil {
+	profileProvider, profileModel := def.LLM.Provider, def.LLM.Model
+	var route llm.RouteTrace
+	var routeWarning string
+	if e.llmRouter != nil {
+		var previewTools []llm.ToolSchema
+		if agentMayUseTools(def) {
+			// Capability routing only needs to know that native tool use is
+			// required; live schemas are assembled later for the inbound channel.
+			previewTools = []llm.ToolSchema{{Name: "configured_agent_tool"}}
+		}
 		var err error
-		p, err = e.llmRouter.DescribeModel(ctx, def.LLM.Provider, def.LLM.Model)
+		route, err = e.llmRouter.PreviewRoute(ctx, def.LLM.Provider, llm.CompletionRequest{
+			Model: def.LLM.Model, Tools: previewTools, MaxTokens: def.LLM.MaxTokens, ReasoningEffort: def.LLM.ReasoningEffort,
+			Routing: llm.RoutingHint{Mode: def.LLM.Routing, Phase: "conversation", AllowedProviders: def.LLM.AllowedProviders, AllowedModels: def.LLM.AllowedModels},
+		})
+		if err != nil {
+			routeWarning = "Smart routing preview: " + err.Error()
+		}
+		if route.SelectedProvider != "" {
+			profileProvider, profileModel = route.SelectedProvider, route.SelectedModel
+		}
+	}
+	p := llm.UnknownModelProfile(profileProvider, profileModel)
+	if e.llmRouter != nil && e.llmRouter.Provider(profileProvider) != nil {
+		var err error
+		p, err = e.llmRouter.DescribeModel(ctx, profileProvider, profileModel)
 		if err != nil {
 			return ModelPreparation{}, err
 		}
 	}
-	result := ModelPreparation{Limits: e.executionLimits(def), AgentID: def.ID, Profile: p, GoalPreserved: true, Warnings: []string{}, Approach: []string{
+	result := ModelPreparation{Limits: e.executionLimits(def), AgentID: def.ID, Profile: p, Routing: route, GoalPreserved: true, Warnings: []string{}, Approach: []string{
 		"Keep the original goal, completion checks, permissions and spending limits unchanged.",
 		"Verify results against evidence; stop and explain blockers instead of claiming unverified success.",
 	}}
+	if routeWarning != "" {
+		result.Warnings = append(result.Warnings, routeWarning)
+	}
 	if p.Warning != "" {
 		result.Warnings = append(result.Warnings, p.Warning)
 	}
@@ -173,6 +199,12 @@ func (e *Engine) prepareModelDefinition(ctx context.Context, def *agent.Definiti
 		def.SystemPrompt += "\n\n[Model-aware execution guidance — not a change to the user's goal]\n" + strings.Join(result.Approach, "\n")
 	}
 	return result, nil
+}
+
+func agentMayUseTools(def *agent.Definition) bool {
+	return len(def.Tools) > 0 || def.Builtins == nil || (def.Builtins != nil && len(*def.Builtins) > 0) ||
+		len(def.Skills) > 0 || len(def.Connections) > 0 || len(def.Knowledge) > 0 || len(def.Agents) > 0 ||
+		(def.MCPServers != nil && len(*def.MCPServers) > 0) || (def.MCPTools != nil && len(*def.MCPTools) > 0)
 }
 
 func workflowModelPreparation(def *agent.Definition) ModelPreparation {

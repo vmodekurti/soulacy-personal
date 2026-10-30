@@ -198,8 +198,11 @@ nav:
     - Browser Automation: agents/browser-automation.md
   - Skills & Plugins:
     - Connectors: extend/connectors.md
+    - Agensi Skill Catalog: extend/agensi.md
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
+    - Built-in Skills: skills/builtin.md
+    - Google Photos Albums: skills/photo-album.md
     - MCP Servers: extend/mcp.md
     - Open Notebook: integrations/open-notebook.md
     - Plugins: extend/plugins.md
@@ -227,6 +230,7 @@ nav:
     - Web GUI: configuration/gui.md
     - Server: configuration/server.md
     - LLM Providers: configuration/llm.md
+    - Model Routing & Observability: configuration/model-routing.md
     - LLM Cost Controls: LLM_COST_CONTROLS.md
     - Request Timeouts: configuration/timeouts.md
     - Storage & Backends: configuration/storage.md

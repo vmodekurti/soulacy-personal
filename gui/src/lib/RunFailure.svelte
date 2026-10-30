@@ -19,7 +19,7 @@
 {/if}
 
 <style>
-  .run-failure { padding: 14px; margin: 10px 0; color: var(--sl-text); border: 1px solid color-mix(in srgb, var(--danger, #dc6b6b) 45%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--danger, #dc6b6b) 6%, var(--sl-surface)); line-height: 1.5; font-size: 0.875rem; min-width: 0; }
+  .run-failure { padding: 14px; margin: 10px 0; color: var(--sl-text); border: 1px solid color-mix(in srgb, var(--danger, var(--sl-danger)) 45%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--danger, var(--sl-danger)) 6%, var(--sl-surface)); line-height: 1.5; font-size: 0.875rem; min-width: 0; }
   .step { margin-top: 6px; font-size: 0.9em; overflow-wrap: anywhere; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 10px 0; max-height: 240px; overflow-y: auto; }
   p { margin: 10px 0 0; }

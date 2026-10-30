@@ -712,7 +712,7 @@
   .muted,
   .freshness,
   .empty {
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
   }
   .lede {
     margin: 0;
@@ -743,11 +743,11 @@
   }
   .metrics small {
     font-size: 19px;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
   }
   .metrics p {
     font-size: 11px;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
     margin: 0;
   }
   nav {
@@ -760,7 +760,7 @@
     padding: 13px 17px;
     border: 0;
     background: none;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
     white-space: nowrap;
     cursor: pointer;
   }
@@ -816,7 +816,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 8px;
-    color: #dfb56f;
+    color: var(--sl-warning);
   }
   .pill.good {
     color: #6cbba9;
@@ -856,7 +856,7 @@
   .task span {
     display: block;
     font-size: 11px;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
     margin-top: 6px;
   }
   .form-grid {
@@ -915,7 +915,7 @@
   }
   .flow span {
     margin: 0 15px;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
   }
   .alert,
   .notice {
@@ -935,7 +935,7 @@
     color: #6cbba9;
   }
   .danger {
-    color: #eb927c;
+    color: var(--sl-danger);
   }
   .empty {
     padding: 30px 5px;
@@ -955,7 +955,7 @@
   }
   th {
     font-weight: 500;
-    color: var(--text-muted, #8e97a6);
+    color: var(--text-muted, var(--sl-text-faint));
   }
   th,
   td {

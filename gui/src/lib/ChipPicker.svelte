@@ -208,8 +208,8 @@
 <style>
   .chip-picker {
     position: relative;
-    background: #0e1020;
-    border: 1px solid #2a2f4a;
+    background: var(--sl-surface-inset);
+    border: 1px solid var(--sl-line);
     border-radius: 6px;
     min-height: 2.2rem;
     cursor: text;
@@ -226,7 +226,7 @@
   .chip {
     display: inline-flex; align-items: center; gap: .25rem;
     background: color-mix(in srgb, var(--sl-accent) 18%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 40%, transparent);
-    color: #c8cadf; font-size: .8rem;
+    color: var(--sl-text); font-size: .8rem;
     padding: .12rem .5rem .12rem .55rem;
     border-radius: 999px; font-family: monospace;
   }
@@ -235,25 +235,25 @@
     background: none; border: none; color: var(--sl-accent-hover);
     cursor: pointer; padding: 0 0 0 .15rem; font-size: 1rem; line-height: 1;
   }
-  .chip-x:hover { color: #f06060; }
+  .chip-x:hover { color: var(--sl-danger); }
 
   .chips-row input[type="text"] {
     flex: 1; min-width: 8rem;
     background: transparent; border: none; outline: none;
-    color: #e8eaf6; font-size: .85rem; padding: .15rem 0;
+    color: var(--sl-text); font-size: .85rem; padding: .15rem 0;
   }
 
   .browse-btn {
     margin-left: auto; flex-shrink: 0;
     background: color-mix(in srgb, var(--sl-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--sl-accent) 45%, transparent);
-    color: #ada8ff; border-radius: 6px; cursor: pointer;
+    color: var(--sl-accent-ink); border-radius: 6px; cursor: pointer;
     font-size: .8rem; line-height: 1; padding: .25rem .5rem;
   }
   .browse-btn:hover { background: color-mix(in srgb, var(--sl-accent) 25%, transparent); }
 
   .suggestions {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50;
-    background: var(--sl-surface); border: 1px solid #2a2f4a; border-radius: 8px;
+    background: var(--sl-surface); border: 1px solid var(--sl-line); border-radius: 8px;
     max-height: 280px; overflow-y: auto;
     box-shadow: 0 8px 24px rgba(0,0,0,.45);
   }
@@ -264,12 +264,12 @@
   }
   .suggestion-group {
     padding: .35rem .7rem .2rem; font-size: .65rem;
-    color: #555a7a; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;
+    color: var(--sl-text-faint); text-transform: uppercase; letter-spacing: .08em; font-weight: 600;
   }
   .suggestion {
     padding: .45rem .7rem; cursor: pointer;
     display: flex; align-items: baseline; gap: .6rem;
-    font-size: .82rem; color: #c8cadf;
+    font-size: .82rem; color: var(--sl-text);
   }
   .suggestion:hover, .suggestion.active { background: color-mix(in srgb, var(--sl-accent) 12%, transparent); }
   .suggestion-label { font-family: monospace; color: var(--sl-accent-hover); flex-shrink: 0; }

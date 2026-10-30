@@ -67,8 +67,8 @@
   .tour-btn {
     flex: 0 0 auto;
     display: inline-flex; align-items: center; gap: .35rem;
-    background: none; color: #7d84ae;
-    border: 1px solid #2a2f4a; border-radius: 8px;
+    background: none; color: var(--sl-text-faint);
+    border: 1px solid var(--sl-line); border-radius: 8px;
     font-size: .78rem; font-weight: 500;
     padding: .34rem .7rem; white-space: nowrap;
   }

@@ -35,7 +35,7 @@
     </nav>
   </header>
 
-  <section class="hero" id="personal-home">
+  <section class="landing-hero" id="personal-home">
     <div class="hero-copy">
       <p class="eyebrow"><span></span> OPEN-SOURCE · SELF-HOSTED · PERSONAL AI</p>
       <h1>An assistant that<br /><em>actually knows you.</em></h1>
@@ -152,18 +152,18 @@
   nav a { box-sizing: border-box; color: #c8cbe0; text-decoration: none; font-size: 13px; font-weight: 750; white-space: nowrap; }
   .nav-link { padding: 10px 12px; border-radius: 9px; }
   .nav-link:hover { background: #ffffff0c; color: #fff; }
-  .login-link { padding: 11px 19px; border: 1px solid #8e7bff77; border-radius: 10px; background: linear-gradient(135deg, #7358eb, #6553d9); color: #fff; box-shadow: 0 10px 28px #392a9e48; }
+  .login-link { padding: 11px 19px; border: 1px solid #8e7bff77; border-radius: 10px; background: linear-gradient(135deg, var(--sl-accent-ink), #6553d9); color: #fff; box-shadow: 0 10px 28px #392a9e48; }
   .login-link:hover { filter: brightness(1.1); }
 
-  .hero { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(340px, .72fr); align-items: center; gap: clamp(50px, 7vw, 96px); width: min(1180px, calc(100% - 48px)); min-height: min(760px, calc(100vh - 92px)); margin: auto; padding: 78px 0 96px; scroll-margin-top: 20px; }
+  .landing-hero { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(340px, .72fr); align-items: center; gap: clamp(50px, 7vw, 96px); width: min(1180px, calc(100% - 48px)); min-height: min(760px, calc(100vh - 92px)); margin: auto; padding: 78px 0 96px; scroll-margin-top: 20px; }
   .eyebrow { display: flex; align-items: center; gap: 9px; margin: 0 0 20px; color: #7ce3b4; font-size: 11px; font-weight: 850; letter-spacing: .16em; }
   .eyebrow span { width: 24px; height: 1px; background: #62d9a4; }
-  .hero h1 { margin: 0; max-width: 760px; font-size: clamp(48px, 5.8vw, 78px); line-height: 1.01; letter-spacing: -.057em; }
-  .hero h1 em { font-style: normal; background: linear-gradient(100deg, #a28eff, #5ea7ff 48%, #48dda0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .landing-hero h1 { margin: 0; max-width: 760px; font-size: clamp(48px, 5.8vw, 78px); line-height: 1.01; letter-spacing: -.057em; }
+  .landing-hero h1 em { font-style: normal; background: linear-gradient(100deg, #a28eff, #5ea7ff 48%, #48dda0); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .lead { max-width: 650px; margin: 26px 0 31px; color: #a7adc4; font-size: 18px; line-height: 1.7; }
   .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; }
   .primary-action, .secondary-action { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 20px; border-radius: 11px; color: #fff; text-decoration: none; font-size: 14px; font-weight: 800; }
-  .primary-action { gap: 18px; background: linear-gradient(135deg, #7358eb, #6553d9); box-shadow: 0 12px 34px #392a9e55; }
+  .primary-action { gap: 18px; background: linear-gradient(135deg, var(--sl-accent-ink), #6553d9); box-shadow: 0 12px 34px #392a9e55; }
   .primary-action:hover { filter: brightness(1.1); transform: translateY(-1px); }
   .secondary-action { border: 1px solid #ffffff1d; background: #ffffff08; color: #c9cce0; }
   .secondary-action:hover { border-color: #ffffff33; background: #ffffff0e; }
@@ -213,8 +213,60 @@
   footer a { color: #949bb4; text-decoration: none; }
   footer a:hover { color: #fff; }
 
+  /* The signed-out experience follows the user's chosen theme without
+     inheriting the workspace's legacy `.hero` compatibility rule. */
+  :global(html[data-theme="light"]) .personal-landing {
+    color: #1d2433;
+    background:
+      radial-gradient(circle at 8% 0%, rgba(112, 93, 244, .14), transparent 32%),
+      radial-gradient(circle at 92% 62%, rgba(46, 187, 133, .13), transparent 30%),
+      linear-gradient(145deg, #fbfcff 0%, #f2f4fb 54%, #eff9f5 100%);
+  }
+  :global(html[data-theme="light"]) .aurora { opacity: .13; }
+  :global(html[data-theme="light"]) .public-header,
+  :global(html[data-theme="light"]) .why,
+  :global(html[data-theme="light"]) footer { border-color: rgba(40, 49, 70, .1); }
+  :global(html[data-theme="light"]) .brand { color: #1d2433; }
+  :global(html[data-theme="light"]) .brand-copy small,
+  :global(html[data-theme="light"]) .trust-row,
+  :global(html[data-theme="light"]) footer { color: #667287; }
+  :global(html[data-theme="light"]) nav a { color: #515d72; }
+  :global(html[data-theme="light"]) .nav-link:hover { color: #252d40; background: rgba(49, 58, 80, .06); }
+  :global(html[data-theme="light"]) .login-link,
+  :global(html[data-theme="light"]) .primary-action { color: #fff; }
+  :global(html[data-theme="light"]) .lead,
+  :global(html[data-theme="light"]) .section-heading > p:last-child,
+  :global(html[data-theme="light"]) article p { color: #667287; }
+  :global(html[data-theme="light"]) .secondary-action { color: #424d63; border-color: rgba(49, 58, 80, .13); background: rgba(255, 255, 255, .62); }
+  :global(html[data-theme="light"]) .secondary-action:hover { color: #252d40; border-color: rgba(91, 92, 226, .28); background: #fff; }
+  :global(html[data-theme="light"]) .login-panel {
+    border-color: rgba(72, 81, 105, .13);
+    background: rgba(255, 255, 255, .84);
+    box-shadow: 0 28px 70px rgba(36, 43, 64, .16), inset 0 1px 0 rgba(255, 255, 255, .92);
+  }
+  :global(html[data-theme="light"]) .login-panel::before { background: linear-gradient(145deg, rgba(118, 89, 239, .18), transparent 47%, rgba(40, 189, 125, .13)); }
+  :global(html[data-theme="light"]) .status,
+  :global(html[data-theme="light"]) .panel-lead,
+  :global(html[data-theme="light"]) .session-note,
+  :global(html[data-theme="light"]) details { color: #667287; }
+  :global(html[data-theme="light"]) .login-panel h2 { color: #1d2433; }
+  :global(html[data-theme="light"]) label,
+  :global(html[data-theme="light"]) summary { color: #424d63; }
+  :global(html[data-theme="light"]) .key-field { border-color: #d8deea; background: #f4f6fb; }
+  :global(html[data-theme="light"]) .key-field input { color: #1d2433 !important; }
+  :global(html[data-theme="light"]) .key-field input::placeholder { color: #7c879b; }
+  :global(html[data-theme="light"]) details { border-color: rgba(49, 58, 80, .1); }
+  :global(html[data-theme="light"]) code { color: #4f527d; background: #edf0f7; }
+  :global(html[data-theme="light"]) article { border-color: rgba(49, 58, 80, .1); background: rgba(255, 255, 255, .72); box-shadow: 0 12px 32px rgba(42, 50, 73, .06); }
+  :global(html[data-theme="light"]) article h3,
+  :global(html[data-theme="light"]) .section-heading h2,
+  :global(html[data-theme="light"]) .closing h2 { color: #1d2433; }
+  :global(html[data-theme="light"]) .closing { border-color: rgba(91, 92, 226, .15); background: linear-gradient(115deg, rgba(118, 89, 239, .1), rgba(255, 255, 255, .72) 52%, rgba(37, 189, 125, .09)); }
+  :global(html[data-theme="light"]) footer a { color: #515d72; }
+  :global(html[data-theme="light"]) footer a:hover { color: #252d40; }
+
   @media (max-width: 920px) {
-    .hero { grid-template-columns: 1fr; gap: 56px; padding: 72px 0 90px; }
+    .landing-hero { grid-template-columns: 1fr; gap: 56px; padding: 72px 0 90px; }
     .hero-copy { max-width: 760px; }
     .login-panel { width: min(520px, 100%); box-sizing: border-box; }
     .feature-grid { grid-template-columns: repeat(2, 1fr); }
@@ -223,9 +275,9 @@
     .public-header { width: min(100% - 32px); padding-top: calc(17px + env(safe-area-inset-top)); padding-bottom: 17px; }
     .nav-link { display: none; }
     .login-link { min-height: 44px; display: grid; place-items: center; padding: 0 17px; }
-    .hero { width: min(100% - 32px); min-height: auto; gap: 48px; padding: 58px 0 82px; }
+    .landing-hero { width: min(100% - 32px); min-height: auto; gap: 48px; padding: 58px 0 82px; }
     .eyebrow { font-size: 9px; line-height: 1.5; }
-    .hero h1 { font-size: clamp(42px, 13vw, 58px); }
+    .landing-hero h1 { font-size: clamp(42px, 13vw, 58px); }
     .lead { margin-top: 22px; font-size: 15px; }
     .hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
     .primary-action, .secondary-action { padding: 0 14px; font-size: 12px; }

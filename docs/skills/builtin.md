@@ -25,6 +25,7 @@ marker, and the Skills page shows them with a **built-in** badge.
 | `weather` | current conditions and forecasts with no API key, answered as a decision |
 | `community-pulse` | what people said in the last 30 days on Hacker News, Reddit, GitHub and the web, with dated quotes |
 | `humanizer` | remove AI writing patterns from a draft while keeping every fact |
+| `photo-album` | a curated, captioned album from photos you pick in Google Photos: a story-style HTML page, optionally a real Google Photos album ([setup](photo-album.md)) |
 
 Every skill has a `references/eval.md` with a handful of prompts and the
 expected behaviour, so it can be checked by hand (and, later, automatically).

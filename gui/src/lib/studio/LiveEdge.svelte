@@ -59,7 +59,7 @@
      Uses the muted text tone (not the faint border) so edges read with physical
      weight on the dark canvas. */
   :global(.svelte-flow .live-edge) {
-    stroke: var(--text-muted, #8b93ab);
+    stroke: var(--text-muted, var(--sl-text-faint));
     stroke-width: 2;
     opacity: 0.85;
     transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease;

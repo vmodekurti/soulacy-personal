@@ -108,20 +108,20 @@
     padding: 9px 10px;
     border: 1px solid var(--border, #2a3350);
     border-radius: 8px;
-    background: var(--bg-elev-2, #171d2c);
+    background: var(--bg-elev-2, var(--sl-surface-muted));
   }
-  label { color: var(--text-muted, #8b93ab); font-size: 11px; font-weight: 650; }
+  label { color: var(--text-muted, var(--sl-text-faint)); font-size: 11px; font-weight: 650; }
   select, input {
     min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px;
-    color: var(--text, #e6e9ef); background: var(--bg, #0f1420);
+    color: var(--text, var(--sl-text)); background: var(--bg, var(--sl-surface-inset));
     border: 1px solid var(--border, #2a3350); border-radius: 6px; font-size: 12px;
   }
   select:focus, input:focus { outline: none; border-color: var(--accent, var(--sl-accent)); }
   p {
-    grid-column: 1 / -1; margin: 0; color: var(--text-muted, #8b93ab);
+    grid-column: 1 / -1; margin: 0; color: var(--text-muted, var(--sl-text-faint));
     font-size: 10.5px; line-height: 1.4;
   }
-  .route-summary { color: var(--text, #e6e9ef); }
+  .route-summary { color: var(--text, var(--sl-text)); }
   @media (max-width: 680px) {
     .generation-trigger { grid-template-columns: 1fr; }
     p { grid-column: auto; }

@@ -176,7 +176,7 @@
   .wt-card {
     position: fixed; z-index: 902;
     width: 340px; max-width: calc(100vw - 24px);
-    background: #141728;
+    background: var(--sl-surface-muted);
     border: 1px solid #2f3459;
     border-radius: 14px;
     padding: 1rem 1.1rem 0.9rem;
@@ -184,24 +184,24 @@
     outline: none;
   }
   .wt-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
-  .wt-count { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: #6f76a0; }
+  .wt-count { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sl-text-faint); }
   .wt-close {
-    margin-left: auto; background: none; color: #6f76a0;
+    margin-left: auto; background: none; color: var(--sl-text-faint);
     font-size: 0.85rem; line-height: 1; padding: 0.2rem 0.3rem; border-radius: 6px;
   }
-  .wt-close:hover { background: #1e2238; color: #d4d7ea; }
+  .wt-close:hover { background: var(--sl-surface-muted); color: #d4d7ea; }
 
   .wt-card h2 {
-    font-size: 1rem; font-weight: 650; color: #f2f3fb;
+    font-size: 1rem; font-weight: 650; color: var(--sl-text);
     display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem;
   }
   .wt-icon { font-size: 0.95rem; }
 
   .wt-what { font-size: 0.855rem; line-height: 1.55; color: #d3d6ec; }
-  .wt-when { font-size: 0.8rem; line-height: 1.55; color: #8b91b8; margin-top: 0.5rem; }
+  .wt-when { font-size: 0.8rem; line-height: 1.55; color: var(--sl-text-faint); margin-top: 0.5rem; }
 
   .wt-bar { height: 3px; border-radius: 2px; background: #232741; margin: 0.9rem 0 0.75rem; overflow: hidden; }
-  .wt-bar-fill { height: 100%; background: linear-gradient(90deg, #7e5cff, #22c47a); transition: width 0.18s ease; }
+  .wt-bar-fill { height: 100%; background: linear-gradient(90deg, var(--sl-accent-ink), #22c47a); transition: width 0.18s ease; }
 
   .wt-actions { display: flex; align-items: center; gap: 0.4rem; }
   .wt-spacer { flex: 1; }
@@ -209,9 +209,9 @@
     background: none; color: #767ca6; font-size: 0.78rem;
     padding: 0.35rem 0.4rem; border-radius: 6px;
   }
-  .wt-ghost:hover { color: #c8cadf; background: #1e2238; }
+  .wt-ghost:hover { color: var(--sl-text); background: var(--sl-surface-muted); }
   .wt-btn {
-    background: #1c2038; color: #dfe2ff; border: 1px solid #2f3459;
+    background: #1c2038; color: var(--sl-text); border: 1px solid #2f3459;
     font-size: 0.8rem; font-weight: 600;
     padding: 0.38rem 0.85rem; border-radius: 8px;
   }
