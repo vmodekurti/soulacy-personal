@@ -2833,6 +2833,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#skillssh-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skills.sh authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#adding-sources-from-the-gui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5242,6 +5253,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#skillssh-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skills.sh authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#adding-sources-from-the-gui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5441,10 +5463,74 @@ new source after a gateway restart.</p>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 2. Install a skill by its skills.sh id (owner/repo/skill)</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>vercel-labs/skills/find-skills
 </span></code></pre></div>
-<p>The install resolves through the skills.sh directory API, fetches the
-skill's file tree, runs the local safety pipeline, shows any partner
-security audit alongside Soulacy's own report at the consent prompt, and
-hot-loads the skill on approval.</p>
+<p>The install resolves the id through skills.sh and fetches the skill's
+files (from the directory API when you have a token, otherwise from the
+skill's GitHub repository; see below). It then runs the local safety
+pipeline, shows any partner security audit next to Soulacy's own report at
+the consent prompt, and hot-loads the skill once you approve.</p>
+<h2 id="skillssh-authentication">skills.sh authentication<a class="headerlink" href="#skillssh-authentication" title="Permanent link">&para;</a></h2>
+<p>Since October 2026 the skills.sh API (search, leaderboard and skill detail)
+answers <code>HTTP 401 authentication_required</code> unless the request carries a
+<strong>Vercel OIDC token</strong> (<code>Authorization: Bearer &lt;VERCEL_OIDC_TOKEN&gt;</code>, see
+<a href="https://skills.sh/docs/api#authentication">skills.sh/docs/api</a>). Those
+tokens are issued to apps deployed on Vercel. Only the audit endpoint
+(<code>/api/v1/skills/audit/{id}</code>) is still public.</p>
+<p>Soulacy keeps skills.sh usable without a token:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Without a token</th>
+<th>With a token</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sy skill install owner/repo/skill</code></td>
+<td>Shallow-clones <code>github.com/owner/repo</code> and installs the directory whose <code>SKILL.md</code> matches the skill (directory name or frontmatter <code>name</code>; a repo with a single <code>SKILL.md</code> installs that one)</td>
+<td>Files come inline from the directory API</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>Matches against the public catalog on the skills.sh homepage (popular skills only)</td>
+<td>Full API search</td>
+</tr>
+<tr>
+<td>Partner audits in the consent prompt</td>
+<td>✓ (public endpoint)</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><code>sy registry probe https://www.skills.sh/</code></td>
+<td>Detected as <code>skillssh</code>, with samples from the public catalog and a note that the API is token-gated</td>
+<td>Detected via the API</td>
+</tr>
+<tr>
+<td>Well-known ids (<code>domain/skill</code>)</td>
+<td>Not installable; the error explains why and what to do instead</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p>The git fallback installs the repository's default branch (<code>HEAD</code>). As with
+any git source the package is unsigned, so <code>--allow-unverified</code> is still
+required.</p>
+<p>To use the API directly, provide a token in either of two ways:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># picked up automatically for skills.sh sources with no auth_headers</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">VERCEL_OIDC_TOKEN</span><span class="o">=</span>…<span class="w">   </span><span class="c1"># e.g. from `vercel link &amp;&amp; vercel env pull` (valid ~12h)</span>
+</span></code></pre></div>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">registries</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skills.sh</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skillssh</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://www.skills.sh</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">auth_headers</span><span class="p">:</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">"Bearer</span><span class="nv"> </span><span class="s">&lt;token&gt;"</span><span class="w">   </span><span class="c1"># sent verbatim; no env expansion</span>
+</span></code></pre></div>
+<p>If a skill can't be reached either way, install it straight from its
+repository directory instead:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sy<span class="w"> </span>skill<span class="w"> </span>install<span class="w"> </span>https://github.com/vercel-labs/skills/tree/main/skills/find-skills
+</span></code></pre></div>
 <h2 id="adding-sources-from-the-gui">Adding sources from the GUI<a class="headerlink" href="#adding-sources-from-the-gui" title="Permanent link">&para;</a></h2>
 <p>On the <strong>Skills</strong> page:</p>
 <ol>
@@ -5461,11 +5547,11 @@ hot-loads the skill on approval.</p>
 <h2 id="what-gets-written">What gets written<a class="headerlink" href="#what-gets-written" title="Permanent link">&para;</a></h2>
 <p>Adding a source appends one entry to the <code>registries:</code> block in
 <code>config.yaml</code>:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">registries</span><span class="p">:</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skills.sh</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skillssh</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://www.skills.sh</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">registries</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skills.sh</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">skillssh</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://www.skills.sh</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
 </span></code></pre></div>
 <p>Sources are queried in ascending <code>priority</code> order with fallback: the first
 registry that resolves a slug wins. For the full config grammar (auth

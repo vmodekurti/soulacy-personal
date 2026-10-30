@@ -5456,6 +5456,9 @@ partner security audits (<code>GET /api/v1/skills/audit/{id}</code>) that are su
 in the install consent prompt. Slugs are skills.sh ids
 (<code>owner/repo/skill</code>). Soulacy's own
 <a href="../safety/">safety introspection</a> still runs on every install.</p>
+<p>The public skills.sh API now requires a Vercel OIDC token. Without one,
+Soulacy falls back to cloning the skill's GitHub repository; see
+<a href="../skill-sources/#skillssh-authentication">Skill Sources → skills.sh authentication</a>.</p>
 <p>See <a href="../skill-sources/">Skill Sources</a> for the guided
 <code>sy registry probe/add</code> flow to add any of these from a URL.</p>
 <h2 id="package-signatures-ed25519">Package signatures (ed25519)<a class="headerlink" href="#package-signatures-ed25519" title="Permanent link">&para;</a></h2>
