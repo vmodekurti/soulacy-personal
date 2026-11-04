@@ -648,15 +648,8 @@ type Definition struct {
 	// Particularly useful for destructive tools: shell_exec, write_file, http_request.
 	ConfirmTools []string `yaml:"confirm_tools,omitempty" json:"confirm_tools,omitempty"`
 
-	// Unattended, when true, lets the agent COMPLETE guardrail-confirmation
-	// actions (privileged system/network steps that normally pause for approval)
-	// in contexts where no interactive confirmer is present — notably scheduled
-	// runs. Without it, such an action is DENIED when there is no GUI to approve
-	// it, so a scheduled agent that needs a privileged step fails every run.
-	// Default false: the safe behavior (deny when nobody can approve) is
-	// preserved; an operator opts into unattended execution explicitly. It does
-	// NOT widen what tools are offered (runtime.allow_system_agents still gates that) — it
-	// only resolves the confirmation gate non-interactively.
+	// Unattended is retained for compatibility with saved agents. It does not
+	// grant approval for actions that require interactive confirmation.
 	Unattended bool `yaml:"unattended,omitempty" json:"unattended,omitempty"`
 
 	// --- Memory ---

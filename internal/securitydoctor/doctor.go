@@ -301,7 +301,7 @@ func riskyCombinations(rep Report, def *agent.Definition) []Finding {
 		out = append(out, Finding{
 			Severity: "warn",
 			Category: "unattended_privileged",
-			Message:  "Privileged agent is marked unattended: guardrail confirmations auto-approve on scheduled runs.",
+			Message:  "Privileged agent has the legacy unattended flag. Schedule only actions that can run under existing policy without interactive approval.",
 			Fix:      "Consider tightening intent_gate to 'deny' and adding explicit ConfirmTools for shell/write/install operations.",
 		})
 	}
