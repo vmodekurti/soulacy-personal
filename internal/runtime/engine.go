@@ -1020,93 +1020,22 @@ func (e *Engine) maybeConfirm(ctx context.Context, def *agent.Definition, call m
 		return nil
 	}
 
-	sender, ok := confirmSenderFrom(ctx)
-	if !ok {
-		// No confirm channel in this context (e.g. a scheduled or non-streaming
-		// run). Unattended is the explicit operator opt-in for hands-off
-		// execution; otherwise fail closed so confirm_tools means the same thing
-		// across GUI chat, HTTP, cron, and channel-triggered runs.
-		if def != nil && def.Unattended {
-			e.log.Warn("tool confirmation required, no confirm channel — auto-approved (unattended agent)",
-				zap.String("agent", def.ID), zap.String("tool", call.Name))
-			e.logAudit(ctx, def, call, "auto-approved (unattended)", time.Now(), false, nil)
-			return nil
-		}
-		e.log.Warn("tool confirmation required but no confirm channel in context — denying",
-			zap.String("tool", call.Name))
-		return fmt.Errorf("tool %q requires confirmation, but no GUI confirmation channel is available", call.Name)
-	}
-
-	callID := uuid.New().String()
-	resultCh := sender(ConfirmRequest{
-		CallID: callID,
-		Tool:   call.Name,
-		Args:   call.Arguments,
-	})
-	// Resolve deletes the pending entry; a run that ends without an answer must
-	// clean up after itself, or the approval sits in the broker forever.
-	defer e.Broker().Forget(callID)
-
-	select {
-	case approved := <-resultCh:
-		if !approved {
-			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
-			return fmt.Errorf("tool %q was denied by the user", call.Name)
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return e.requiredHumanConfirm(ctx, def, call, "agent confirmation policy")
 }
 
 func (e *Engine) dynamicConfirm(ctx context.Context, def *agent.Definition, call message.ToolCall, reason string) error {
-	sender, ok := confirmSenderFrom(ctx)
-	if !ok {
-		// No confirm channel in this context (e.g. a scheduled run). An agent
-		// explicitly marked Unattended opts into auto-approving these guardrail
-		// confirmations so it can COMPLETE without a human present; otherwise we
-		// DENY for safety. The auto-approval is recorded in the audit log.
-		if def != nil && def.Unattended {
-			e.log.Warn("guardrail required confirmation, no confirm channel — auto-approved (unattended agent)",
-				zap.String("agent", def.ID), zap.String("tool", call.Name), zap.String("reason", reason))
-			e.logAudit(ctx, def, call, "auto-approved (unattended)", time.Now(), false, nil)
-			return nil
-		}
-		e.log.Warn("guardrail required confirmation but no confirm channel in context — denying",
-			zap.String("tool", call.Name))
-		return fmt.Errorf("guardrail required confirmation, but no GUI available to confirm: %s", reason)
-	}
-
-	callID := uuid.New().String()
-	resultCh := sender(ConfirmRequest{
-		CallID: callID,
-		Tool:   call.Name,
-		Args:   call.Arguments,
-		Reason: reason,
-	})
-	defer e.Broker().Forget(callID)
-
-	select {
-	case approved := <-resultCh:
-		if !approved {
-			e.logAudit(ctx, def, call, "", time.Now(), true, nil)
-			return fmt.Errorf("tool %q was denied by the user (guardrail flag: %s)", call.Name, reason)
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return e.requiredHumanConfirm(ctx, def, call, reason)
 }
 
-// requiredHumanConfirm is for actions where an unattended agent may never
-// stand in for a person. Unlike the general guardrail confirmation path, this
-// deliberately ignores def.Unattended and fails closed without a live GUI.
+// requiredHumanConfirm enforces approval across interactive and unattended runs.
 func (e *Engine) requiredHumanConfirm(ctx context.Context, def *agent.Definition, call message.ToolCall, reason string) error {
 	sender, ok := confirmSenderFrom(ctx)
 	if !ok {
 		e.log.Warn("explicit human confirmation required but no confirm channel is available",
 			zap.String("agent", agentIDOf(def)), zap.String("tool", call.Name), zap.String("reason", reason))
-		return fmt.Errorf("this action requires explicit user approval in Soulacy: %s", reason)
+		err := fmt.Errorf("tool %q requires explicit user approval in Soulacy (%s). Rerun in interactive Chat to review the action", call.Name, reason)
+		e.logAudit(ctx, def, call, "", time.Now(), true, err)
+		return err
 	}
 	callID := uuid.New().String()
 	resultCh := sender(ConfirmRequest{CallID: callID, Tool: call.Name, Args: call.Arguments, Reason: reason})
@@ -1167,7 +1096,7 @@ func (e *Engine) logAudit(ctx context.Context, def *agent.Definition, call messa
 	e.auditLog.Log(audit.Entry{
 		Timestamp:  start.UTC(),
 		SessionID:  sessionID,
-		AgentID:    def.ID,
+		AgentID:    agentIDOf(def),
 		Tool:       call.Name,
 		Args:       call.Arguments,
 		ResultLen:  len(result),

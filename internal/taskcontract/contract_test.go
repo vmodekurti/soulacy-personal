@@ -103,6 +103,19 @@ func TestFailedRoutesReplanWithinBoundThenBlock(t *testing.T) {
 	}
 }
 
+func TestOAuthInvalidGrantMakesBlockedRunActionable(t *testing.T) {
+	now := time.Now().UTC()
+	c := New("oauth-run", contractMessage("Triage my inbox"), now)
+	c.ObserveTool(message.ToolCall{Name: "gmail_list"}, `exit status 1: {"error":"invalid_grant"}`, true)
+	c.MarkIncomplete("completion evidence missing")
+
+	got := c.Complete(nil, true, false, now)
+	if got.State != "incomplete" || !strings.Contains(got.Blocker, "gmail_list") ||
+		!strings.Contains(got.Blocker, "Reconnect the account") {
+		t.Fatalf("missing actionable OAuth blocker: %+v", got)
+	}
+}
+
 func TestRecordsAreRedactedAndBounded(t *testing.T) {
 	secret := "api_key=" + "sk-" + strings.Repeat("a1", 30)
 	c := New("run-5", contractMessage(secret+" "+strings.Repeat("x", 900)), time.Now().UTC())

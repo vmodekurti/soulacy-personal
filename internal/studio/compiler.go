@@ -250,9 +250,7 @@ type Draft struct {
 	// knowledge bases when the subject matches; mapped to Definition.Knowledge on
 	// save.
 	Knowledge []string `json:"knowledge,omitempty"`
-	// Unattended opts the saved agent into auto-approving guardrail confirmations
-	// in non-interactive (e.g. scheduled) runs (Story #14). Set by the user via
-	// the Studio toggle; mapped to Definition.Unattended on save.
+	// Unattended preserves the legacy setting when loading and saving agents.
 	Unattended bool `json:"unattended,omitempty"`
 
 	// Outcome is the draft's BUSINESS-OUTCOME CONTRACT (P0-4): what a run must

@@ -516,7 +516,6 @@
     parallelPeerCalls: 'When the model calls two or more different peer agents in one turn, run those peer agents concurrently and return results in the original order. Use for coordinator agents with independent research/review tasks.',
     structuredPeerResults: 'Wrap peer-agent replies in a SOULACY_AGENT_RESULT JSON envelope. Use when a coordinator needs stable fields such as target_agent, content, citations, confidence, or parsed JSON from the peer.',
     confirmTools: 'Tools listed here pause for human approval before running. Use all to approve every tool call, or list only risky tools such as shell_exec, write_file, http_request, channel.send, and python_eval.',
-    unattended: 'Allows scheduled or non-interactive runs to auto-approve confirmation gates. Use only for trusted automation after testing manually.',
     toolTimeout: 'Per-tool timeout for this Python tool. Use longer values for slow fetches or exports without weakening every tool in the agent.',
     toolRetries: 'Extra attempts after this Python tool fails. Use for idempotent fetch/read/parse tools; leave blank for side-effecting tools.',
     toolRetryBackoff: 'Delay between retry attempts. Keep short for flaky HTTP reads; increase for rate-limited APIs.',
@@ -2649,10 +2648,7 @@ console.log(reply);` : ''
                 <button class="btn-secondary small" type="button" on:click={confirmAllTools}>Confirm all tools</button>
                 <button class="btn-secondary small" type="button" on:click={clearConfirmTools}>Clear</button>
               </div>
-              <label class="check-row safety-toggle" data-tooltip={llmTips.unattended}>
-                <input type="checkbox" bind:checked={editing.unattended} />
-                <span>Unattended runs may auto-approve confirmation gates</span>
-              </label>
+              <p class="safety-warn">Scheduled runs block actions that require interactive confirmation.</p>
               {#if unconfirmedRiskyTools().length}
                 <div class="safety-warn">
                   Risky selected tools are not confirmation-gated:
