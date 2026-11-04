@@ -5477,9 +5477,9 @@ automatically. See <a href="../../studio-learning-memory/">Studio learning &amp;
 <p class="admonition-title">Warning</p>
 <p>Confirmation needs an interactive channel to deliver the prompt. Without
 one (for example a plain non-streaming request or a scheduled run), required
-confirmation is denied by default. <code>unattended: true</code> explicitly opts an
-agent into auto-approval in that situation and records it in the audit log.
-Do not enable unattended execution merely to dismiss an approval error.</p>
+confirmation is denied and recorded in the audit log. Open the agent in
+interactive Chat to review the action. Existing <code>unattended</code> settings
+do not grant approval.</p>
 </div>
 <h2 id="sharing-a-conversation">Sharing a conversation<a class="headerlink" href="#sharing-a-conversation" title="Permanent link">&para;</a></h2>
 <p>The <strong>Share</strong> button in the Chat header creates a read-only link to the current
