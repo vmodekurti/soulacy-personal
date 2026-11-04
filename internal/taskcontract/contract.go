@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -96,15 +97,16 @@ type Snapshot struct {
 
 // Contract is a concurrency-safe reducer for tool calls that may execute in parallel.
 type Contract struct {
-	mu               sync.Mutex
-	snapshot         Snapshot
-	failedRoutes     map[string]bool
-	pendingReplan    bool
-	replanDispatched int
-	verified         bool
-	toolSuccesses    int
-	toolFailures     int
-	awaitingInput    bool
+	mu                sync.Mutex
+	snapshot          Snapshot
+	failedRoutes      map[string]bool
+	pendingReplan     bool
+	replanDispatched  int
+	verified          bool
+	toolSuccesses     int
+	toolFailures      int
+	awaitingInput     bool
+	credentialBlocker string
 }
 
 func New(runID string, msg message.Message, now time.Time) *Contract {
@@ -198,6 +200,14 @@ func (c *Contract) Define(goal string, criteria []string) {
 	}
 }
 
+// IsOAuthInvalidGrant recognizes a rejected OAuth grant from connector and
+// subprocess errors. Retrying the same grant cannot restore authorization.
+func IsOAuthInvalidGrant(err error) bool {
+	return err != nil && oauthInvalidGrant.MatchString(err.Error())
+}
+
+var oauthInvalidGrant = regexp.MustCompile(`(?i)\binvalid_grant\b`)
+
 // ObserveTool adds runtime evidence and schedules a bounded replan after a
 // failed route. A model's prose never calls this method.
 func (c *Contract) ObserveTool(call message.ToolCall, result string, failed bool) {
@@ -225,6 +235,9 @@ func (c *Contract) ObserveTool(call message.ToolCall, result string, failed bool
 	}
 	if failed {
 		c.toolFailures++
+		if oauthInvalidGrant.MatchString(result) {
+			c.credentialBlocker = fmt.Sprintf("OAuth grant rejected by %q (invalid_grant). Reconnect the account used by this tool and rerun", name)
+		}
 		if name == "" {
 			name = "unknown"
 		}
@@ -323,6 +336,7 @@ func (c *Contract) Complete(runErr error, successful, degraded bool, now time.Ti
 		c.snapshot.State = "completed"
 		switch {
 		case degraded:
+			c.snapshot.State = "blocked"
 			c.snapshot.Outcome = OutcomeBlocked
 			if c.snapshot.Blocker == "" {
 				c.snapshot.Blocker = "completion criteria were not met"
@@ -350,6 +364,9 @@ func (c *Contract) Complete(runErr error, successful, degraded bool, now time.Ti
 		default:
 			c.snapshot.Outcome = OutcomeDirectAnswer
 		}
+	}
+	if c.credentialBlocker != "" && c.snapshot.State != "completed" {
+		c.snapshot.Blocker = bounded(redact.Text(c.credentialBlocker), maxSummaryRunes)
 	}
 	t := now
 	c.snapshot.CompletedAt = &t

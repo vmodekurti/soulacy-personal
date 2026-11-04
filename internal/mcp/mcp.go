@@ -403,7 +403,7 @@ const credentialRejectedPrefix = "credential rejected"
 // authFailureRe matches what servers say when they did not accept the
 // credential: HTTP 401/403 from the transport, or the usual wording in an
 // isError result.
-var authFailureRe = regexp.MustCompile(`(?i)(^|\b)(http 401|http 403|unauthori[sz]ed|forbidden|missing api key|invalid api key|invalid or expired (access )?token|authentication (failed|required))\b`)
+var authFailureRe = regexp.MustCompile(`(?i)(^|\b)(http 401|http 403|unauthori[sz]ed|forbidden|missing api key|invalid api key|invalid_grant|invalid or expired (access )?token|authentication (failed|required))\b`)
 
 func looksLikeAuthFailure(msg string) bool { return authFailureRe.MatchString(msg) }
 

@@ -108,7 +108,7 @@ Synthesis view that pulls from every earlier Cohort F story so operators get the
   - `wildcard_mcp` (critical) — wildcard MCP declaration + shared channel exposure → unbounded tool surface on a reachable channel.
   - `channel_exposure` (critical) — privileged tier + shared channel binding without `accept_privileged_exposure:true`; names the exact channel.
   - `domain_allowlist` (warn) — http_request in the tool list without `policy.allow_domains` OR `policy.network:deny`.
-  - `unattended_privileged` (warn) — privileged agent with `unattended:true` (auto-approves confirmations on scheduled runs).
+  - `unattended_privileged` (warn) — privileged agent with the legacy `unattended:true` setting. Required confirmations remain enforced.
   - `missing_confirm` (info) — privileged tool not listed under `confirm_tools`. One finding per un-confirmed high-risk tool.
   - `intent_gate` (info) — intent gate mode is still `prompt (default)`; suggests `deny` for production.
 - **Dry-run simulator**: new `DryRun(def, DryRunInput) DryRunResult`. Takes an adversarial `InjectedContent` sample + a hypothetical `FollowupTool` + args, runs the S2 scanner + S3 intent gate (respecting the agent's configured `IntentGate` mode), and returns a structured verdict: `InjectionSeverity` + `InjectionFindings`, `IntentDecision` (`allow`/`prompt`/`deny`), `IntentReason`, `GoalMatched`, `InjectionInfluenced`, plus a human-readable one-line `Verdict` for the modal ("DENY — the runtime would refuse the tool call. …"). Nothing is executed; the whole simulation is pure computation.

@@ -30,6 +30,7 @@ import (
 
 	"github.com/soulacy/soulacy/internal/learning"
 	"github.com/soulacy/soulacy/internal/llm"
+	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/memory"
 	"github.com/soulacy/soulacy/internal/session"
 	"github.com/soulacy/soulacy/pkg/agent"
@@ -609,6 +610,22 @@ func TestStreamCallback_AbsentReturnsNil(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // engine.go — RunTool with MCP tool name format (blocked / allowed)
 // ─────────────────────────────────────────────────────────────────────────────
+
+func TestRunTool_MCPConfirmationBlocksUnattendedDispatch(t *testing.T) {
+	e := newMinimalEngine(t)
+	e.mcpClient = mcp.New(mcp.Config{}, zap.NewNop())
+	t.Cleanup(func() { _ = e.mcpClient.Close() })
+
+	const tool = "mcp__example__write"
+	grants := []string{tool}
+	def := &agent.Definition{
+		ID: "scheduled", Unattended: true, MCPTools: &grants, ConfirmTools: []string{tool},
+	}
+	_, err := e.runTool(context.Background(), def, "session", message.ToolCall{ID: "call", Name: tool})
+	if err == nil || !strings.Contains(err.Error(), "requires explicit user approval") {
+		t.Fatalf("got %v, want approval failure before connector dispatch", err)
+	}
+}
 
 // TestRunTool_MCPFormat_NoMCPClient verifies that calling runTool with an MCP
 // tool name format when no MCP client is configured returns an error.

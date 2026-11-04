@@ -51,8 +51,9 @@ Check exact resource/KB/device IDs, scope, allowlists, and source availability.
 For knowledge retrieval, use **Test search** before changing the model.
 
 If a tool needs approval but the run has no interactive confirmation channel,
-the default is to deny. `unattended: true` is an explicit operator opt-in with
-different consequences, not a routine troubleshooting fix.
+the action is denied. Run it in interactive Chat to review the approval.
+For an OAuth `invalid_grant` failure, reconnect the account used by the
+failing tool before rerunning the agent.
 
 ## 5. Was the result generated but not delivered?
 

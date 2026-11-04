@@ -642,15 +642,15 @@ func assessAgentCapabilityScope(draft Draft, def *agent.Definition, add func(id,
 	if def.Schedule != nil && strings.TrimSpace(def.Schedule.Cron) != "" {
 		isScheduled = true
 	}
-	if privileged && isScheduled && !def.Unattended {
+	if privileged && isScheduled {
 		add("agent.capability_scope", "Capability scope", "warn", "",
-			"This agent has system-level capabilities and runs on a cron schedule, but is not marked Unattended — scheduled fires will silently stall waiting for a human approval that no one is there to give.",
-			"A scheduled run has nobody to answer a confirmation prompt, so it will stop and fail. Either remove the privileged tools (the safer option), or tick Unattended in the Build step's inspector to auto-approve them — check which tools that covers under `confirm_tools:` in the SOUL.yaml view (the `</>` tab) before you do.")
+			"This scheduled agent has system-level capabilities. Any step requiring interactive approval is blocked.",
+			"Remove steps requiring confirmation from the schedule or run them in interactive Chat.")
 	}
 	pol := def.Policy
 	polAllowShell := strings.EqualFold(strings.TrimSpace(pol.Shell), "allow")
 	polAllowNetwork := strings.EqualFold(strings.TrimSpace(pol.Network), "allow")
-	if polAllowShell && len(pol.DenyPaths) == 0 && !def.Unattended {
+	if polAllowShell && len(pol.DenyPaths) == 0 {
 		add("agent.capability_scope", "Capability scope", "warn", "",
 			"policy.shell = allow with no deny_paths — every shell tool call is unfiltered.",
 			"As written, this agent can run any shell command without asking. In the SOUL.yaml view (the `</>` tab above the canvas) set `policy.shell: prompt` so it asks first, or list the paths it must never touch under `deny_paths:`.")

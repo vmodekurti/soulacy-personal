@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/soulacy/soulacy/internal/processutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,7 +27,9 @@ import (
 	"github.com/soulacy/soulacy/internal/llm"
 	"github.com/soulacy/soulacy/internal/mcp"
 	"github.com/soulacy/soulacy/internal/policy"
+	"github.com/soulacy/soulacy/internal/processutil"
 	"github.com/soulacy/soulacy/internal/sandbox"
+	"github.com/soulacy/soulacy/internal/taskcontract"
 	"github.com/soulacy/soulacy/pkg/agent"
 	"github.com/soulacy/soulacy/pkg/message"
 	sdkhooks "github.com/soulacy/soulacy/sdk/hooks"
@@ -45,6 +46,9 @@ func (e *Engine) runTool(ctx context.Context, def *agent.Definition, sessionID s
 	}
 	started := time.Now()
 	out, err := e.runToolDispatch(ctx, def, sessionID, call)
+	if taskcontract.IsOAuthInvalidGrant(err) {
+		err = fmt.Errorf("tool %q: OAuth grant rejected (invalid_grant). Reconnect the account used by this tool and rerun", call.Name)
+	}
 	after := lifecycleAfterData("success", err)
 	after["tool"] = call.Name
 	after["duration_ms"] = time.Since(started).Milliseconds()
@@ -189,10 +193,16 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 		if !mcpToolAllowed(def, call.Name) {
 			return "", fmt.Errorf("MCP tool %q is not allowed for agent %q", call.Name, def.ID)
 		}
+		if err := e.maybeConfirm(ctx, def, call); err != nil {
+			return "", err
+		}
+		started := time.Now()
 		tctx, cancel := context.WithTimeout(ctx, e.effectiveToolTimeout(ctx))
 		defer cancel()
 		out, callErr := e.mcpClient.Call(tctx, call.Name, call.Arguments)
-		return out, toolTimeoutError(call.Name, e.toolTimeout, ctx.Err(), callErr)
+		callErr = toolTimeoutError(call.Name, e.effectiveToolTimeout(ctx), ctx.Err(), callErr)
+		e.logAudit(ctx, def, call, out, started, false, callErr)
+		return out, callErr
 	}
 
 	// Plugin tools — namespaced as plugin__<pluginID>__<tool>. Execute as a
@@ -207,6 +217,9 @@ func (e *Engine) runToolDispatch(ctx context.Context, def *agent.Definition, ses
 			}
 			if !strings.HasPrefix(pt.Handler, "python:") {
 				return "", fmt.Errorf("plugin tool %q: unsupported handler scheme %q", call.Name, pt.Handler)
+			}
+			if err := e.maybeConfirm(ctx, def, call); err != nil {
+				return "", err
 			}
 			rest := strings.TrimPrefix(pt.Handler, "python:")
 			parts := strings.SplitN(rest, "::", 2)
@@ -252,6 +265,9 @@ print(result if isinstance(result, str) else json.dumps(result))
 	// own RunTimeout (via its caller chain) bounds it. The parent's context
 	// deadline also still applies.
 	if strings.HasPrefix(call.Name, AgentToolPrefix) {
+		if err := e.maybeConfirm(ctx, def, call); err != nil {
+			return "", err
+		}
 		return e.runAgentCall(ctx, def, call.Name, call.Arguments)
 	}
 
@@ -484,6 +500,9 @@ print(result if isinstance(result, str) else json.dumps(result))
 		cancel()
 		if err == nil {
 			return out, nil
+		}
+		if taskcontract.IsOAuthInvalidGrant(err) {
+			return "", err
 		}
 		lastErr = err
 	}
