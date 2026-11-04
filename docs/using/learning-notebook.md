@@ -40,6 +40,9 @@ lesson into every prompt. Search is weighted keyword matching, so wording matter
 - **Propose useful lessons:** permits proposals during suitable runs. It never
   means automatically approve them. Off still allows explicit Teach/review.
 - **Loaded count:** the guidance was made available; it is not an effectiveness score.
+- **Effect on results:** compares recorded runs with and without the lesson. It
+  is a reason to review the lesson, not proof that the lesson caused the
+  difference. See [Is a lesson helping?](../LEARNING_NOTEBOOK.md#is-a-lesson-helping).
 - **Helpful / Needs improvement:** feedback for that lesson, not a self-modifying prompt.
 - **Disable lesson:** excludes future reads/runs; cannot erase already-sent context.
 - **Draft restoration:** creates a reviewable version; does not grant new tool access.

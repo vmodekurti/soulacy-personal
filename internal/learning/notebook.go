@@ -258,6 +258,8 @@ func (n *Notebook) Review(ctx context.Context, scope Scope, id, action string) (
 			}
 		}
 		l.Status = "active"
+		approved := time.Now().UTC()
+		l.ApprovedAt = &approved
 	case "reject":
 		if l.Status == "rejected" {
 			return l, nil
@@ -306,6 +308,7 @@ func (n *Notebook) Review(ctx context.Context, scope Scope, id, action string) (
 		l.Uses = 0
 		l.Helpful = 0
 		l.Unhelpful = 0
+		l.ApprovedAt = nil
 		l.CreatedAt = time.Now().UTC()
 	default:
 		return Lesson{}, ErrInvalidLesson

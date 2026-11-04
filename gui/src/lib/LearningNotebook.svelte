@@ -2,13 +2,13 @@
   import { onMount, onDestroy } from 'svelte'
   import { apiFetch } from './api.js'
   import { apiKey } from './stores.js'
-  import { validateLesson, validateLessons, lessonStatusLabel } from './learningNotebook.js'
+  import { validateLesson, validateLessons, lessonStatusLabel, validateEffect, effectVerdictLabel } from './learningNotebook.js'
   export let agentID
-  let lessons = [], selected = null, previous = null, status = 'pending', note = '', busy = false, enabled = false, automatic = false, error = '', notice = '', acknowledged = false
+  let lessons = [], selected = null, previous = null, effect = null, status = 'pending', note = '', busy = false, enabled = false, automatic = false, error = '', notice = '', acknowledged = false
   let generation = 0, offset = 0, total = 0
   const base = () => `/agents/${encodeURIComponent(agentID)}/learning`
   const post = (url, body) => apiFetch(url, { method: 'POST', body: JSON.stringify(body) })
-  function clear() { generation++; lessons = []; selected = null; previous = null; acknowledged = false; busy = false; error = ''; notice = '' }
+  function clear() { generation++; lessons = []; selected = null; previous = null; effect = null; acknowledged = false; busy = false; error = ''; notice = '' }
   async function load(page = 0) {
     if (busy || !agentID) return
     clear(); const current = generation; busy = true
@@ -22,7 +22,7 @@
   }
   async function open(l) {
     if (busy) return
-    const current = ++generation; selected = null; previous = null; acknowledged = false; error = ''; notice = ''; busy = true
+    const current = ++generation; selected = null; previous = null; effect = null; acknowledged = false; error = ''; notice = ''; busy = true
     try {
       const value = await apiFetch(`${base()}/lessons/${encodeURIComponent(l.id)}`)
       if (current !== generation) return
@@ -30,6 +30,10 @@
       if (selected.base_id) {
         const old = await apiFetch(`${base()}/lessons/${encodeURIComponent(selected.base_id)}`)
         if (current === generation) previous = validateLesson(old, agentID, selected.base_id)
+      }
+      if (selected?.status === 'active') {
+        // Advisory only: an unavailable comparison never blocks the review.
+        try { const value = await apiFetch(`${base()}/lessons/${encodeURIComponent(l.id)}/effect`); if (current === generation) effect = validateEffect(value, l.id) } catch { effect = null }
       }
     } catch (e) { if (current === generation) { error = e.message; selected = null } }
     finally { if (current === generation) busy = false }
@@ -109,6 +113,7 @@
     <h4>How to check it</h4><p>{selected.verification}</p>
     <details open><summary>Evidence to review</summary><p>A matching quote proves the source exists—not that the lesson’s interpretation is correct.</p>{#each selected.sources as source}<blockquote><small>{source.kind === 'user' ? 'User statement' : `${source.tool} · ${source.failed ? 'failed' : 'returned a result'}`}</small><pre>{source.text}</pre></blockquote>{/each}</details>
     <p>Loaded {selected.uses} time{selected.uses === 1 ? '' : 's'} · Your feedback: {selected.helpful ? 'Helpful' : selected.unhelpful ? 'Needs improvement' : 'Not rated'}</p>
+    {#if selected.status === 'active' && effect}<details class="effect"><summary>Effect on results · {effectVerdictLabel(effect.verdict)}</summary><p>{effect.reason}</p><p>With it: {effect.with.problems} of {effect.with.runs} runs had a problem. Similar runs without it: {effect.without.problems} of {effect.without.runs}.</p><p>A problem is a failed run or a tool error. This compares recorded runs; it is not proof the lesson caused the difference.</p></details>{/if}
     {#if selected.status === 'active'}<div class="actions"><button disabled={busy} on:click={() => feedback(1)}>Helpful</button><button disabled={busy} on:click={() => feedback(-1)}>Needs improvement</button></div>{/if}
     {#if selected.status !== 'rejected'}<label class="ack"><input type="checkbox" bind:checked={acknowledged} disabled={busy} /> I reviewed this lesson, its sources and limitations.</label><div class="actions">
       {#if selected.status === 'pending'}<button disabled={busy || !acknowledged} on:click={() => change('approve')}>Approve lesson</button><button disabled={busy || !acknowledged} on:click={() => change('reject')}>Reject draft</button>

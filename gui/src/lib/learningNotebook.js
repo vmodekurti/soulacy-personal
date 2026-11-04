@@ -20,3 +20,10 @@ export function validateLessons(value, agentID) {
       !Number.isInteger(value.total) || value.total < 0 || value.total > 2000 || !Number.isInteger(value.offset) || value.offset < 0 || value.offset > 2000 || value.lessons.length > Math.max(0, value.total - value.offset)) invalid()
   return value.lessons.map(l => validateLesson(l, agentID))
 }
+const effectVerdicts = { better: 'Fewer problems with it', worse: 'More problems with it', no_clear_difference: 'No clear difference', too_early: 'Too early to tell', unused: 'Not being used' }
+export const effectVerdictLabel = v => effectVerdicts[v] || v
+const outcome = o => o && [o.runs, o.problems].every(n => Number.isSafeInteger(n) && n >= 0) && o.problems <= o.runs
+// The effect is advisory: a malformed one is dropped, never shown as a verdict.
+export function validateEffect(e, id) {
+  return e && e.lesson_id === id && e.verdict in effectVerdicts && typeof e.reason === 'string' && outcome(e.with) && outcome(e.without) ? e : null
+}
