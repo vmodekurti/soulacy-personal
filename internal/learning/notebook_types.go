@@ -70,9 +70,12 @@ type Lesson struct {
 	Sources   []Source  `json:"sources"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Uses      int       `json:"uses"`
-	Helpful   int       `json:"helpful"`
-	Unhelpful int       `json:"unhelpful"`
+	// ApprovedAt is set when a revision becomes active. Older records fall
+	// back to UpdatedAt, which approval also set.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+	Uses       int        `json:"uses"`
+	Helpful    int        `json:"helpful"`
+	Unhelpful  int        `json:"unhelpful"`
 }
 
 type Episode struct {
@@ -82,6 +85,10 @@ type Episode struct {
 	Reply     string    `json:"reply"`
 	Success   bool      `json:"success"`
 	CreatedAt time.Time `json:"created_at"`
+	// Tool counts skip the tools learning never observes (learning, Safe
+	// Undo, session search, delegated agents). Older episodes report zero.
+	ToolCalls    int `json:"tool_calls,omitempty"`
+	ToolFailures int `json:"tool_failures,omitempty"`
 }
 
 var lessonKey = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)

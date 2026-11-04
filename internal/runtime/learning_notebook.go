@@ -29,6 +29,8 @@ type learningRun struct {
 	sources          []learning.Source
 	proposals        int
 	maxProposals     int
+	// Outcome counts feed lesson effectiveness; they need no model call.
+	toolCalls, toolFailures int
 }
 
 func (e *Engine) SetLearningNotebook(n *learning.Notebook, authenticated bool) {
@@ -107,6 +109,10 @@ func (e *Engine) observeLearningTool(ctx context.Context, def *agent.Definition,
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
+	run.toolCalls++
+	if err != nil {
+		run.toolFailures++
+	}
 	if len(run.sources) >= 9 {
 		return
 	}
@@ -128,7 +134,10 @@ func (e *Engine) finishLearningRun(ctx context.Context, msg, reply message.Messa
 	if ctx.Err() != nil {
 		return
 	}
-	if err := n.RecordEpisode(ctx, run.scope, learning.Episode{RunID: run.runID, SessionID: run.sessionID, Request: flattenParts(msg.Parts), Reply: flattenParts(reply.Parts), Success: success}); err != nil {
+	run.mu.Lock()
+	calls, failures := run.toolCalls, run.toolFailures
+	run.mu.Unlock()
+	if err := n.RecordEpisode(ctx, run.scope, learning.Episode{RunID: run.runID, SessionID: run.sessionID, Request: flattenParts(msg.Parts), Reply: flattenParts(reply.Parts), Success: success, ToolCalls: calls, ToolFailures: failures}); err != nil {
 		e.log.Warn("learning episode unavailable", zap.Error(err))
 	}
 }
