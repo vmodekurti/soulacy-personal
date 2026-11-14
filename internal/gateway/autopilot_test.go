@@ -199,3 +199,24 @@ func containsJSON(raw string, values ...string) bool {
 	}
 	return true
 }
+
+func TestAutopilotDraftGoalNeverSavesOrStarts(t *testing.T) {
+	s, _ := newAutopilotGateway(t)
+	status, body := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/draft", "secret", `{"request":"Research a trip and review it"}`)
+	if status == 201 || status == 202 {
+		t.Fatalf("draft must not persist or start a goal: %d %v", status, body)
+	}
+	if status == 200 && body["saved"] != false {
+		t.Fatalf("draft response must say it is unsaved: %v", body)
+	}
+	if status != 200 && status != 422 && status != 502 {
+		t.Fatalf("unexpected status %d: %v", status, body)
+	}
+	status, list := gatewayJSON(t, s, "GET", "/api/v1/autopilot/goals", "secret", "")
+	if status != 200 {
+		t.Fatal(list)
+	}
+	if goals, _ := list["goals"].([]any); len(goals) != 0 {
+		t.Fatalf("draft left goals behind: %v", goals)
+	}
+}

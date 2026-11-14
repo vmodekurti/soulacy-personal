@@ -11,7 +11,7 @@ actual buttons with a read-only test agent.
 | Run proofs | Inspect a run's checks, tools, duration, cost, and revision | Independent verification of every real-world claim |
 | Releases | Snapshot, simulate, run candidates, canary, promote, freeze, roll back | Deploying the server binary or iOS app |
 | Regression checks | Review checks derived from failures against candidate evidence | Automatically rewriting agent instructions |
-| Goal teams | Run a bounded dependency graph of agent tasks | Unrestricted background workers with unlimited budget |
+| Goals | Draft and run an ordered plan or a custom dependency graph | Unrestricted background workers with unlimited budget |
 | Safe Undo | Review configured reversible external changes | A universal undo for arbitrary tools |
 
 On iPhone, use **Settings → Verified Autopilot**; some controls are also
@@ -53,9 +53,19 @@ pricing admission, and tool permissions also apply. See [cost controls](../LLM_C
 
 ## A small goal team: draft, then review
 
-Create two saved read-only agents first. In **Goal teams**, give the goal a
-title/objective and bounded cost/time limits. The task JSON uses **real agent
-IDs**, not display names. Replace the IDs below before saving:
+Create two saved read-only agents with mission acceptance checks. In **Goals**,
+enter a title, an objective, a total inference budget, and a time limit. Add a
+research step and a review step, then select an agent and enter instructions
+for each. Each step receives the preceding step’s result. All steps share the
+goal’s budget and deadline.
+
+To start from a description instead, enter what you want in **Describe the goal** and select **Draft plan from description**. The draft only fills the form with steps from agents you can use; nothing is saved or started until you review it and select **Save goal draft**.
+
+Select **Save goal draft** and review the plan. Select **Start team** when
+you’re ready to run it. Monitor step status and results on the goal card.
+
+For branching dependencies or tighter per-step limits, select **Use an advanced
+task graph**. The JSON uses agent IDs. Replace the example IDs before saving:
 
 ```json
 [

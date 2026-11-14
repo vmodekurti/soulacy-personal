@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -281,4 +282,36 @@ func (s *Server) closeAutopilot() {
 	}
 	s.autopilotMu.Unlock()
 	s.autopilotWG.Wait()
+}
+
+// handleAutopilotDraftGoal turns a plain-language request into a reviewable
+// plan. It only returns the draft: nothing is saved or started until the owner
+// reviews it and uses the normal create-goal action.
+func (s *Server) handleAutopilotDraftGoal(c *fiber.Ctx) error {
+	if _, err := s.autopilotOwner(c); err != nil {
+		return err
+	}
+	var body struct {
+		Request string `json:"request"`
+	}
+	if len(c.Body()) > 16*1024 || c.BodyParser(&body) != nil {
+		return s.errMsg(c, 400, "invalid request")
+	}
+	agents := []autopilot.DraftAgent{}
+	for _, def := range s.loader.All() {
+		if s.loader.IsBuiltin(def.ID) || !s.autopilotCanAccess(c, def.ID, rbac.ActionWrite) {
+			continue
+		}
+		agents = append(agents, autopilot.DraftAgent{ID: def.ID, Name: def.Name, Description: def.Description})
+	}
+	draft, err := autopilot.DraftGoalPlan(c.UserContext(), s.studioLLM(c), body.Request, agents)
+	switch {
+	case errors.Is(err, autopilot.ErrDraftUnusable):
+		return s.errMsg(c, 422, "The model could not draft a usable plan. Rephrase the goal or write the steps yourself.")
+	case errors.Is(err, autopilot.ErrInvalid):
+		return s.autopilotError(c, err)
+	case err != nil:
+		return s.errMsg(c, 502, "The drafting model is unavailable right now.")
+	}
+	return c.JSON(fiber.Map{"draft": draft, "saved": false})
 }
