@@ -64,6 +64,16 @@ To start from a description instead, enter what you want in **Describe the goal*
 Select **Save goal draft** and review the plan. Select **Start team** when
 you’re ready to run it. Monitor step status and results on the goal card.
 
+### If a goal is interrupted
+
+If Soulacy restarts while a step is running, that step is marked **blocked** and
+is never retried automatically, because an external change may already have
+happened. Later steps wait. On the goal card, check the external system, then
+record the outcome: choose succeeded or failed, enter the evidence you checked,
+and enter the measured cost and seconds. Unmeasured steps stay failed. A
+succeeded outcome resumes the goal; select **Resume** on a running goal with no
+blocked step to restart it without changing completed results.
+
 For branching dependencies or tighter per-step limits, select **Use an advanced
 task graph**. The JSON uses agent IDs. Replace the example IDs before saving:
 

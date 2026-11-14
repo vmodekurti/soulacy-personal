@@ -101,3 +101,32 @@ it("fills the editor from a described goal without saving or starting it", async
     apiFetch.mockImplementation(async () => ({}));
   }
 });
+
+it("does not record an outcome for a blocked step without evidence and measurements", async () => {
+  apiFetch.mockClear();
+  apiFetch.mockImplementation(async (path) => path === "/autopilot/goals"
+    ? { goals: [{ id: "g1", title: "Restarted", objective: "o", status: "running", cost_usd: 0, duration_ms: 0,
+        budget: { max_cost_usd: 1, max_duration_ms: 600000 },
+        tasks: [{ id: "first", title: "First", agent_id: "research", status: "blocked", depends_on: [], error: "unknown" }] }] }
+    : {});
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  const target = document.createElement("div");
+  document.body.appendChild(target);
+  const page = new Autopilot({ target });
+  const button = (text) => [...target.querySelectorAll("button")].find((element) => element.textContent.trim() === text);
+  try {
+    await vi.waitFor(() => expect(button("Goals")).toBeDefined());
+    button("Goals").click();
+    await vi.waitFor(() => expect(target.textContent).toContain("Restarted"));
+    expect(button("Resume")).toBeUndefined();
+    button("Record outcome").click();
+    await vi.waitFor(() => expect(target.textContent).toContain("Enter the evidence"));
+    const writes = apiFetch.mock.calls.filter(([path, options]) => options?.method === "POST");
+    expect(writes).toHaveLength(0);
+  } finally {
+    page.$destroy();
+    target.remove();
+    confirm.mockRestore();
+    apiFetch.mockImplementation(async () => ({}));
+  }
+});
