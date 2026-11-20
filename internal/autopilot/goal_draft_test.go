@@ -39,6 +39,17 @@ func TestDraftGoalPlanReturnsOrderedValidatedSteps(t *testing.T) {
 	}
 }
 
+func TestDraftGoalPlanIgnoresBracesInTrailingProse(t *testing.T) {
+	model := &fakeDraftModel{reply: `{"title":"T","objective":"O","steps":[{"title":"x","agent_id":"research","prompt":"p"}]} Notes: keep {it} short.`}
+	draft, err := DraftGoalPlan(context.Background(), model, "goal", draftAgents)
+	if err != nil {
+		t.Fatalf("valid plan followed by prose should parse, got %v", err)
+	}
+	if len(draft.Steps) != 1 {
+		t.Fatalf("unexpected steps: %+v", draft.Steps)
+	}
+}
+
 func TestDraftGoalPlanRejectsAgentsTheOwnerCannotAssign(t *testing.T) {
 	model := &fakeDraftModel{reply: `{"title":"T","objective":"O","steps":[{"title":"x","agent_id":"system","prompt":"p"}]}`}
 	_, err := DraftGoalPlan(context.Background(), model, "goal", draftAgents)

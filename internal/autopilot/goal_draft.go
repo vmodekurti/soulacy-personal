@@ -92,8 +92,7 @@ func buildGoalDraftPrompt(request string, agents []DraftAgent) string {
 
 func parseGoalPlan(raw string, allowed map[string]DraftAgent) (GoalPlanDraft, error) {
 	start := strings.Index(raw, "{")
-	end := strings.LastIndex(raw, "}")
-	if start < 0 || end <= start {
+	if start < 0 {
 		return GoalPlanDraft{}, ErrDraftUnusable
 	}
 	var parsed struct {
@@ -105,7 +104,9 @@ func parseGoalPlan(raw string, allowed map[string]DraftAgent) (GoalPlanDraft, er
 			Prompt  string `json:"prompt"`
 		} `json:"steps"`
 	}
-	if err := json.Unmarshal([]byte(raw[start:end+1]), &parsed); err != nil {
+	// Decode only the first complete JSON object so braces in trailing prose
+	// (for example "{note}" after the plan) do not break an otherwise valid reply.
+	if err := json.NewDecoder(strings.NewReader(raw[start:])).Decode(&parsed); err != nil {
 		return GoalPlanDraft{}, ErrDraftUnusable
 	}
 	draft := GoalPlanDraft{Title: strings.TrimSpace(parsed.Title), Objective: strings.TrimSpace(parsed.Objective)}
