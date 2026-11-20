@@ -201,6 +201,8 @@ nav:
     - Agensi Skill Catalog: extend/agensi.md
     - Installing Skills: extend/installing-skills.md
     - Skill Sources: extend/skill-sources.md
+    - Built-in Skills: skills/builtin.md
+    - Google Photos Albums: skills/photo-album.md
     - MCP Servers: extend/mcp.md
     - Open Notebook: integrations/open-notebook.md
     - Plugins: extend/plugins.md

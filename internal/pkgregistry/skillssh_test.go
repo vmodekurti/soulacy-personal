@@ -363,3 +363,186 @@ func TestSkillsSh_RequiresBaseURLDefault(t *testing.T) {
 		t.Errorf("default base = %q", p.baseURL)
 	}
 }
+
+// fakeAuthGatedSkillsSh mimics skills.sh since 2026-10: search, detail and
+// leaderboard answer 401 without a Vercel OIDC token; audits stay public.
+func fakeAuthGatedSkillsSh(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/skills/audit/", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"audits": []map[string]any{{"provider": "Socket", "status": "pass"}},
+		})
+	})
+	mux.HandleFunc("/api/v1/skills/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"authentication_required","message":"This endpoint requires authentication."}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// gitSkillRepo creates <root>/acme/skills.git holding skills/web-audit.
+func gitSkillRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	repo := filepath.Join(root, "acme", "skills.git")
+	if err := os.MkdirAll(filepath.Join(repo, "skills", "web-audit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "init", "-b", "main")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test")
+	for path, body := range map[string]string{
+		"skills/web-audit/SKILL.md": "---\nname: web-audit\n---\nAudit a site.",
+		"skills/other/SKILL.md":     "---\nname: other\n---\nSomething else.",
+		"README.md":                 "repo readme",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "fixture")
+	return root
+}
+
+func TestSkillsSh_ResolveAndFetchFallBackToGitWithoutToken(t *testing.T) {
+	srv := fakeAuthGatedSkillsSh(t)
+	p, err := newSkillsShProvider(map[string]any{"id": "skills-sh", "base_url": srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.gitBase = "file://" + gitSkillRepo(t)
+
+	pkg, err := p.Resolve(context.Background(), "acme/skills/web-audit")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if pkg.Source != p.gitBase+"/acme/skills.git" || pkg.Version != "HEAD" {
+		t.Fatalf("pkg = %+v, want git fallback source", pkg)
+	}
+	if !strings.Contains(pkg.Description, "Vercel OIDC") || !strings.Contains(pkg.Description, "Socket: pass") {
+		t.Errorf("description = %q, want auth note + public audits", pkg.Description)
+	}
+
+	dst := filepath.Join(t.TempDir(), "installed")
+	if err := p.Fetch(context.Background(), pkg, dst); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
+	if err != nil || !strings.Contains(string(b), "Audit a site") {
+		t.Fatalf("SKILL.md: %v %q", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "README.md")); !os.IsNotExist(err) {
+		t.Errorf("repository root leaked into the skill: %v", err)
+	}
+}
+
+func TestSkillsSh_FetchViaGitReportsMissingSkill(t *testing.T) {
+	p, err := newSkillsShProvider(map[string]any{"id": "skills-sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.gitBase = "file://" + gitSkillRepo(t)
+	pkg := sdkpkg.Package{Slug: "acme/skills/ghost", Source: p.gitBase + "/acme/skills.git"}
+	err = p.Fetch(context.Background(), pkg, filepath.Join(t.TempDir(), "x"))
+	if err == nil || !strings.Contains(err.Error(), `no SKILL.md for "ghost"`) {
+		t.Fatalf("err = %v, want missing-skill error", err)
+	}
+}
+
+func TestSkillsSh_ResolveWellKnownIDWithoutTokenExplainsAuth(t *testing.T) {
+	srv := fakeAuthGatedSkillsSh(t)
+	p := newTestSkillsShProvider(t, srv.URL)
+	_, err := p.Resolve(context.Background(), "example.com/some-skill")
+	if err == nil || !strings.Contains(err.Error(), "VERCEL_OIDC_TOKEN") || !strings.Contains(err.Error(), "HTTP 401") {
+		t.Fatalf("err = %v, want 401 plus actionable hint", err)
+	}
+	if errors.Is(err, sdkpkg.ErrNotFound) {
+		t.Errorf("auth failure must not look like an unknown slug")
+	}
+}
+
+func TestSkillsSh_SearchAuthFailureIncludesHint(t *testing.T) {
+	srv := fakeAuthGatedSkillsSh(t)
+	p := newTestSkillsShProvider(t, srv.URL)
+	_, err := p.Search(context.Background(), "audit")
+	if err == nil || !strings.Contains(err.Error(), "skills.sh/docs/api#authentication") {
+		t.Fatalf("err = %v, want auth hint", err)
+	}
+}
+
+func TestSkillsShGitHubID(t *testing.T) {
+	for slug, want := range map[string]bool{
+		"vercel-labs/skills/find-skills": true,
+		"example.com/skill":              false,
+		"a/b":                            false,
+		"a/../c":                         false,
+		"-x/repo/skill":                  false,
+		"docs.example.com/team/skill":    false,
+	} {
+		if _, _, _, ok := skillsShGitHubID(slug); ok != want {
+			t.Errorf("skillsShGitHubID(%q) ok = %v, want %v", slug, ok, want)
+		}
+	}
+}
+
+func TestFindSkillDir(t *testing.T) {
+	write := func(root, path, body string) {
+		t.Helper()
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("frontmatter name", func(t *testing.T) {
+		root := t.TempDir()
+		write(root, "skills/dir-a/SKILL.md", "---\nname: \"pretty-name\"\n---\n")
+		write(root, "skills/dir-b/SKILL.md", "---\nname: other\n---\n")
+		got, err := findSkillDir(root, "pretty-name")
+		if err != nil || got != filepath.Join(root, "skills", "dir-a") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("shallowest match wins", func(t *testing.T) {
+		root := t.TempDir()
+		write(root, "examples/nested/find-skills/SKILL.md", "x")
+		write(root, "skills/find-skills/SKILL.md", "x")
+		write(root, "find-skills/SKILL.md", "x")
+		got, err := findSkillDir(root, "find-skills")
+		if err != nil || got != filepath.Join(root, "find-skills") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("single skill repo", func(t *testing.T) {
+		root := t.TempDir()
+		write(root, "SKILL.md", "---\nname: Something\n---\n")
+		got, err := findSkillDir(root, "unrelated-id")
+		if err != nil || got != root {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+}
+
+func TestSkillsShCatalogEntriesUsesEnclosingObject(t *testing.T) {
+	// Real skills.sh pages pack many entries together; a neighbouring
+	// entry's source must not be attributed to the next skill.
+	catalog := `[{"source":"vercel-labs/skills","skillId":"find-skills","name":"find-skills","installs":4},` +
+		`{"source":"mattpocock/skills","skillId":"grill-me","name":"grill-me","installs":1}]`
+	pkgs := skillsShCatalogEntries(catalog, "s", 10, func(string) bool { return true })
+	var got []string
+	for _, p := range pkgs {
+		got = append(got, p.Slug)
+	}
+	if strings.Join(got, ",") != "vercel-labs/skills/find-skills,mattpocock/skills/grill-me" {
+		t.Fatalf("slugs = %v", got)
+	}
+}

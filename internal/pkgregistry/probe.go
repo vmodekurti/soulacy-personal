@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -118,6 +119,25 @@ func Probe(ctx context.Context, rawURL string) (ProbeReport, error) {
 		return rep, nil
 	}
 
+	// 2b. skills.sh directory whose API now demands a Vercel OIDC token:
+	// still a usable source (owner/repo/skill installs fall back to git).
+	if samples, ok := probeSkillsShAuthGated(ctx, base); ok {
+		rep.Kind = SourceKindSkillsSh
+		rep.Samples = samples
+		rep.HasAudits = true
+		rep.Detail = fmt.Sprintf(
+			"skills.sh-compatible skill directory whose API requires a Vercel OIDC token "+
+				"(https://skills.sh/docs/api#authentication). Without one, installs of "+
+				"owner/repo/skill ids fall back to cloning the skill's GitHub repository, and "+
+				"search uses the public catalog page; partner security audits stay public. "+
+				"Set VERCEL_OIDC_TOKEN (or auth_headers on the entry) for full API access. "+
+				"Found %d sample skills.", len(samples))
+		rep.Suggested = &config.RegistryConfig{
+			ID: registryIDFromHost(u.Host), Type: "skillssh", BaseURL: base, Priority: 50,
+		}
+		return rep, nil
+	}
+
 	// 3. E19 HTTP registry.
 	if samples, ok := probeE19(ctx, base); ok {
 		rep.Kind = SourceKindHTTP
@@ -169,6 +189,50 @@ func probeSkillsSh(ctx context.Context, base string) (samples []string, ok bool)
 		samples = append(samples, s.ID)
 	}
 	return samples, true
+}
+
+// probeSkillsShAuthGated recognises a skills.sh deployment that answers
+// its search API with 401 authentication_required, and lists sample skills
+// from the public catalog embedded in its homepage.
+func probeSkillsShAuthGated(ctx context.Context, base string) (samples []string, ok bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/skills/search?q=skill&limit=5", nil)
+	if err != nil {
+		return nil, false
+	}
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || decodeErr != nil || body.Error != "authentication_required" {
+		return nil, false
+	}
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, base+"/", nil)
+	if err != nil {
+		return nil, false
+	}
+	resp, err = probeClient.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, false
+	}
+	text := strings.ReplaceAll(html.UnescapeString(string(raw)), `\"`, `"`)
+	all := func(string) bool { return true }
+	for _, pkg := range skillsShCatalogEntries(text, "", 5, all) {
+		samples = append(samples, pkg.Slug)
+	}
+	return samples, len(samples) > 0
 }
 
 // probeE19 checks for the E19 registry API shape.

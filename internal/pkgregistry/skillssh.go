@@ -1,11 +1,14 @@
 package pkgregistry
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,11 +18,28 @@ import (
 	"time"
 
 	"github.com/soulacy/soulacy/internal/cfgmap"
+	"github.com/soulacy/soulacy/internal/plugininstall"
 	sdkpkg "github.com/soulacy/soulacy/sdk/pkgregistry"
 )
 
 // DefaultSkillsShBase is the public skills.sh directory.
 const DefaultSkillsShBase = "https://skills.sh"
+
+// defaultSkillsShGitBase is where GitHub-sourced skills.sh ids are cloned
+// from when the directory API refuses an unauthenticated request.
+const defaultSkillsShGitBase = "https://github.com"
+
+// errSkillsShAuthRequired marks a 401/403 from the directory API. Since
+// 2026-10 skills.sh gates search, leaderboard and detail behind a Vercel
+// OIDC token; only the audit endpoint stays public.
+var errSkillsShAuthRequired = errors.New("skills.sh API requires authentication")
+
+// skillsShAuthHint is appended to auth failures so the user learns what to
+// do instead of reading a raw 401.
+const skillsShAuthHint = "skills.sh now requires a Vercel OIDC token for its API " +
+	"(https://skills.sh/docs/api#authentication). Set VERCEL_OIDC_TOKEN or auth_headers " +
+	"on the registry, or install from the skill's git source, e.g. " +
+	"sy skill install https://github.com/<owner>/<repo>/tree/<branch>/<dir>"
 
 // skillsShProvider talks to a skills.sh-style directory (Story E26):
 //
@@ -31,9 +51,14 @@ const DefaultSkillsShBase = "https://skills.sh"
 // "{domain}/{skill}" (well-known sources). Files arrive inline as JSON, so
 // Fetch materialises them directly — no archive, no checksum (the detail
 // response's hash is recorded as the version for change detection).
+//
+// When the API answers 401 (no Vercel OIDC token), GitHub-sourced ids fall
+// back to a shallow clone of github.com/{owner}/{repo}, from which the
+// directory holding the skill's SKILL.md is selected.
 type skillsShProvider struct {
 	id      string
 	baseURL string
+	gitBase string
 	headers map[string]string
 	client  *http.Client
 }
@@ -54,6 +79,7 @@ func newSkillsShProvider(cfg map[string]any) (*skillsShProvider, error) {
 	return &skillsShProvider{
 		id:      cfgmap.Str(cfg, "id", "skillssh"),
 		baseURL: base,
+		gitBase: defaultSkillsShGitBase,
 		headers: headers,
 		client:  &http.Client{Timeout: 60 * time.Second},
 	}, nil
@@ -93,6 +119,9 @@ func (p *skillsShProvider) getJSON(ctx context.Context, rawURL string, out any) 
 		}
 		if msg == "" {
 			msg = http.StatusText(resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return resp.StatusCode, fmt.Errorf("pkgregistry: %s: HTTP %d: %s: %w", p.id, resp.StatusCode, msg, errSkillsShAuthRequired)
 		}
 		return resp.StatusCode, fmt.Errorf("pkgregistry: %s: HTTP %d: %s", p.id, resp.StatusCode, msg)
 	}
@@ -160,6 +189,9 @@ func (p *skillsShProvider) Search(ctx context.Context, query string) ([]sdkpkg.P
 		}
 	}
 	if lastErr != nil && len(out) == 0 {
+		if errors.Is(lastErr, errSkillsShAuthRequired) {
+			return nil, fmt.Errorf("%w. %s", lastErr, skillsShAuthHint)
+		}
 		return nil, lastErr
 	}
 	return out, nil
@@ -198,6 +230,13 @@ func skillsShCatalogMatches(catalog, query, providerID string) []sdkpkg.Package 
 	if needle.empty() {
 		return nil
 	}
+	return skillsShCatalogEntries(catalog, providerID, 25, needle.matches)
+}
+
+// skillsShCatalogEntries extracts up to limit skills embedded in a
+// skills.sh page, keeping those whose "source skillId name slug" haystack
+// passes keep.
+func skillsShCatalogEntries(catalog, providerID string, limit int, keep func(haystack string) bool) []sdkpkg.Package {
 	out := make([]sdkpkg.Package, 0, 10)
 	seen := map[string]bool{}
 	for _, loc := range skillsShCatalogSkillIDRE.FindAllStringSubmatchIndex(catalog, -1) {
@@ -208,6 +247,14 @@ func skillsShCatalogMatches(catalog, query, providerID string) []sdkpkg.Package 
 		end := loc[1] + 1000
 		if end > len(catalog) {
 			end = len(catalog)
+		}
+		// Prefer the enclosing {…} object: a fixed window also spans the
+		// neighbouring entries and would pick up the previous skill's source.
+		if open := strings.LastIndexByte(catalog[start:loc[0]], '{'); open >= 0 {
+			start += open
+		}
+		if closeAt := strings.IndexByte(catalog[loc[1]:end], '}'); closeAt >= 0 {
+			end = loc[1] + closeAt + 1
 		}
 		window := catalog[start:end]
 		source := skillsShCatalogField(window, "source")
@@ -232,7 +279,7 @@ func skillsShCatalogMatches(catalog, query, providerID string) []sdkpkg.Package 
 		}
 		slug := source + "/" + skillID
 		haystack := strings.Join([]string{source, skillID, name, slug}, " ")
-		if !needle.matches(haystack) {
+		if !keep(haystack) {
 			continue
 		}
 		key := strings.ToLower(slug)
@@ -247,7 +294,7 @@ func skillsShCatalogMatches(catalog, query, providerID string) []sdkpkg.Package 
 			Description: fmt.Sprintf("%s — %s installs (%s, public catalog fallback)", name, installs, source),
 			Provider:    providerID,
 		})
-		if len(out) >= 25 {
+		if len(out) >= limit {
 			break
 		}
 	}
@@ -453,6 +500,9 @@ func (p *skillsShProvider) detail(ctx context.Context, slug string) (skillsShDet
 // Resolve implements pkgregistry.Provider.
 func (p *skillsShProvider) Resolve(ctx context.Context, slug string) (sdkpkg.Package, error) {
 	d, err := p.detail(ctx, slug)
+	if errors.Is(err, errSkillsShAuthRequired) {
+		return p.resolveViaGit(ctx, slug, err)
+	}
 	if err != nil {
 		return sdkpkg.Package{}, err
 	}
@@ -471,6 +521,47 @@ func (p *skillsShProvider) Resolve(ctx context.Context, slug string) (sdkpkg.Pac
 		Slug:        d.ID,
 		Version:     version,
 		Source:      d.ID,
+		Description: desc,
+		Provider:    p.id,
+	}, nil
+}
+
+// skillsShGitHubID splits a GitHub-sourced skills.sh id
+// ("owner/repo/skill"). Well-known ids ("domain/skill") report ok=false.
+func skillsShGitHubID(slug string) (owner, repo, skill string, ok bool) {
+	parts := strings.Split(strings.Trim(strings.TrimSpace(slug), "/"), "/")
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, "-") {
+			return "", "", "", false
+		}
+	}
+	if strings.Contains(parts[0], ".") {
+		return "", "", "", false // a domain, not a GitHub owner
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+// resolveViaGit is the unauthenticated fallback: the directory API refused
+// us, so resolve a GitHub-sourced id straight to its repository. Fetch
+// recognises the git Source and clones instead of calling the API. The
+// public audit endpoint still informs the consent prompt.
+func (p *skillsShProvider) resolveViaGit(ctx context.Context, slug string, authErr error) (sdkpkg.Package, error) {
+	owner, repo, skill, ok := skillsShGitHubID(slug)
+	if !ok {
+		return sdkpkg.Package{}, fmt.Errorf("%w. %s", authErr, skillsShAuthHint)
+	}
+	desc := fmt.Sprintf("skills.sh API needs a Vercel OIDC token; installing %q from its GitHub source %s/%s/%s",
+		skill, p.gitBase, owner, repo)
+	if audits := p.auditSummary(ctx, slug); audits != "" {
+		desc += " · audits: " + audits
+	}
+	return sdkpkg.Package{
+		Slug:        owner + "/" + repo + "/" + skill,
+		Version:     "HEAD",
+		Source:      p.gitBase + "/" + owner + "/" + repo + ".git",
 		Description: desc,
 		Provider:    p.id,
 	}, nil
@@ -510,6 +601,9 @@ func (p *skillsShProvider) auditSummary(ctx context.Context, slug string) string
 // Fetch implements pkgregistry.Provider: the file tree arrives inline from
 // the detail endpoint and is materialised under dstDir (traversal-guarded).
 func (p *skillsShProvider) Fetch(ctx context.Context, pkg sdkpkg.Package, dstDir string) error {
+	if strings.Contains(pkg.Source, "://") {
+		return p.fetchViaGit(ctx, pkg, dstDir)
+	}
 	slug := pkg.Source
 	if slug == "" {
 		slug = pkg.Slug
@@ -541,4 +635,108 @@ func (p *skillsShProvider) Fetch(ctx context.Context, pkg sdkpkg.Package, dstDir
 		}
 	}
 	return nil
+}
+
+// fetchViaGit shallow-clones the skill's repository next to dstDir, selects
+// the directory holding the skill's SKILL.md, and moves it into dstDir.
+func (p *skillsShProvider) fetchViaGit(ctx context.Context, pkg sdkpkg.Package, dstDir string) error {
+	_, _, skill, ok := skillsShGitHubID(pkg.Slug)
+	if !ok {
+		return fmt.Errorf("pkgregistry: %s: %q is not an owner/repo/skill id", p.id, pkg.Slug)
+	}
+	parent := filepath.Dir(dstDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("pkgregistry: %w", err)
+	}
+	tmp, err := os.MkdirTemp(parent, ".skillssh-git-")
+	if err != nil {
+		return fmt.Errorf("pkgregistry: create git staging directory: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+	cloneRoot := filepath.Join(tmp, "repo")
+	if err := plugininstall.GitCloneRef(ctx, pkg.Source, pkg.SourceRef, cloneRoot); err != nil {
+		return fmt.Errorf("pkgregistry: %s: skills.sh API unavailable without a token and the git fallback failed: %w", p.id, err)
+	}
+	selected, err := findSkillDir(cloneRoot, skill)
+	if err != nil {
+		return fmt.Errorf("pkgregistry: %s: %s: %w", p.id, pkg.Source, err)
+	}
+	// Callers may hand us an existing empty directory (tests, t.TempDir).
+	if entries, rerr := os.ReadDir(dstDir); rerr == nil {
+		if len(entries) > 0 {
+			return fmt.Errorf("pkgregistry: destination already exists")
+		}
+		if err := os.Remove(dstDir); err != nil {
+			return fmt.Errorf("pkgregistry: %w", err)
+		}
+	}
+	if err := os.Rename(selected, dstDir); err != nil {
+		return fmt.Errorf("pkgregistry: stage skill directory: %w", err)
+	}
+	return nil
+}
+
+// findSkillDir picks the directory inside root that holds the named skill:
+// a SKILL.md whose directory name or frontmatter name equals skill
+// (case-insensitive; shallowest wins), or the repository's only SKILL.md.
+// Symlinks are never followed, so the result cannot escape root.
+func findSkillDir(root, skill string) (string, error) {
+	var all, matches []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules") {
+			return filepath.SkipDir
+		}
+		if d.Name() != "SKILL.md" || !d.Type().IsRegular() {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		all = append(all, dir)
+		if strings.EqualFold(filepath.Base(dir), skill) || strings.EqualFold(skillFrontmatterName(path), skill) {
+			matches = append(matches, dir)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("scan repository: %w", err)
+	}
+	if len(matches) == 0 && len(all) == 1 {
+		matches = all
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no SKILL.md for %q found in the repository", skill)
+	}
+	best := matches[0]
+	for _, m := range matches[1:] {
+		if strings.Count(m, string(filepath.Separator)) < strings.Count(best, string(filepath.Separator)) {
+			best = m
+		}
+	}
+	return best, nil
+}
+
+// skillFrontmatterName returns the `name:` field of a SKILL.md's YAML
+// frontmatter, or "" when there is none.
+func skillFrontmatterName(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(io.LimitReader(f, 16<<10))
+	if !sc.Scan() || strings.TrimSpace(sc.Text()) != "---" {
+		return ""
+	}
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "---" {
+			return ""
+		}
+		if v, ok := strings.CutPrefix(line, "name:"); ok {
+			return strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return ""
 }

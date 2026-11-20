@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -77,6 +78,12 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 // SQLiteStore implements Store using a SQLite database.
 type SQLiteStore struct {
 	db *sql.DB
+
+	// mu guards closed; bg tracks the background last_used_at writes so
+	// Close can wait for them before closing the DB.
+	mu     sync.Mutex
+	closed bool
+	bg     sync.WaitGroup
 }
 
 // NewSQLiteStore opens (or creates) the API keys SQLite database at path.
@@ -232,8 +239,18 @@ func (s *SQLiteStore) Validate(ctx context.Context, plaintext string) (APIKey, e
 		key.Scopes = []string{}
 	}
 
-	// Update last_used_at in the background — fire-and-forget
+	// Update last_used_at in the background so callers never block on it.
+	// The goroutine is tracked so Close waits for it; once the store is
+	// closed no new update starts.
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return key, nil
+	}
+	s.bg.Add(1)
+	s.mu.Unlock()
 	go func() {
+		defer s.bg.Done()
 		now := time.Now().UTC().Format("2006-01-02 15:04:05")
 		_, _ = s.db.Exec(
 			`UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?`,
@@ -354,7 +371,12 @@ func (s *SQLiteStore) List(ctx context.Context, includeRevoked bool) ([]APIKey, 
 	return out, rows.Err()
 }
 
-// Close closes the DB connection.
+// Close waits for in-flight background last_used_at updates, then closes
+// the DB connection.
 func (s *SQLiteStore) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.bg.Wait()
 	return s.db.Close()
 }

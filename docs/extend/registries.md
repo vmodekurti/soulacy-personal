@@ -77,6 +77,10 @@ in the install consent prompt. Slugs are skills.sh ids
 (`owner/repo/skill`). Soulacy's own
 [safety introspection](safety.md) still runs on every install.
 
+The public skills.sh API now requires a Vercel OIDC token. Without one,
+Soulacy falls back to cloning the skill's GitHub repository; see
+[Skill Sources → skills.sh authentication](skill-sources.md#skillssh-authentication).
+
 See [Skill Sources](skill-sources.md) for the guided
 `sy registry probe/add` flow to add any of these from a URL.
 
