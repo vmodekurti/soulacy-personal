@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/living-core-blue-v1.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1498,6 +1498,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="A small goal team: draft, then review">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#if-a-goal-is-interrupted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If a goal is interrupted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -5172,6 +5189,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="A small goal team: draft, then review">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#if-a-goal-is-interrupted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If a goal is interrupted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -5288,8 +5322,8 @@ actual buttons with a read-only test agent.</p>
 <td>Automatically rewriting agent instructions</td>
 </tr>
 <tr>
-<td>Goal teams</td>
-<td>Run a bounded dependency graph of agent tasks</td>
+<td>Goals</td>
+<td>Draft and run an ordered plan or a custom dependency graph</td>
 <td>Unrestricted background workers with unlimited budget</td>
 </tr>
 <tr>
@@ -5329,9 +5363,24 @@ an exact tool allowlist, maximum duration, and maximum inference cost. A
 send claims. Budgets are ceilings, not price estimates. Normal model policy,
 pricing admission, and tool permissions also apply. See <a href="../../LLM_COST_CONTROLS/">cost controls</a>.</p>
 <h2 id="a-small-goal-team-draft-then-review">A small goal team: draft, then review<a class="headerlink" href="#a-small-goal-team-draft-then-review" title="Permanent link">&para;</a></h2>
-<p>Create two saved read-only agents first. In <strong>Goal teams</strong>, give the goal a
-title/objective and bounded cost/time limits. The task JSON uses <strong>real agent
-IDs</strong>, not display names. Replace the IDs below before saving:</p>
+<p>Create two saved read-only agents with mission acceptance checks. In <strong>Goals</strong>,
+enter a title, an objective, a total inference budget, and a time limit. Add a
+research step and a review step, then select an agent and enter instructions
+for each. Each step receives the preceding step’s result. All steps share the
+goal’s budget and deadline.</p>
+<p>To start from a description instead, enter what you want in <strong>Describe the goal</strong> and select <strong>Draft plan from description</strong>. The draft only fills the form with steps from agents you can use; nothing is saved or started until you review it and select <strong>Save goal draft</strong>.</p>
+<p>Select <strong>Save goal draft</strong> and review the plan. Select <strong>Start team</strong> when
+you’re ready to run it. Monitor step status and results on the goal card.</p>
+<h3 id="if-a-goal-is-interrupted">If a goal is interrupted<a class="headerlink" href="#if-a-goal-is-interrupted" title="Permanent link">&para;</a></h3>
+<p>If Soulacy restarts while a step is running, that step is marked <strong>blocked</strong> and
+is never retried automatically, because an external change may already have
+happened. Later steps wait. On the goal card, check the external system, then
+record the outcome: choose succeeded or failed, enter the evidence you checked,
+and enter the measured cost and seconds. Unmeasured steps stay failed. A
+succeeded outcome resumes the goal; select <strong>Resume</strong> on a running goal with no
+blocked step to restart it without changing completed results.</p>
+<p>For branching dependencies or tighter per-step limits, select <strong>Use an advanced
+task graph</strong>. The JSON uses agent IDs. Replace the example IDs before saving:</p>
 <div class="language-json highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">[</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p">{</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"draft"</span><span class="p">,</span>
@@ -5488,7 +5537,7 @@ for the narrow resources it supports.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "navigation.footer", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
