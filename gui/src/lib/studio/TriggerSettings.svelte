@@ -88,7 +88,7 @@
         checked={!!workflow?.unattended}
         on:change={(e) => apply({ unattended: e.target.checked })}
       />
-      <span><strong>Allow unattended execution</strong><small>Scheduled system/network actions can run without an approval prompt.</small></span>
+      <span><strong>Allow unattended execution</strong><small>Legacy setting. Actions requiring interactive confirmation are blocked during scheduled runs.</small></span>
     </label>
   {:else if triggerType === 'channel'}
     <label for="studio-trigger-channel">Inbound channel</label>

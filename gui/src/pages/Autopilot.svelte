@@ -8,7 +8,9 @@
     money,
     canAcceptProposal,
     candidateProofs,
+    orderedGoalTasks,
     parseGoalTasks,
+    goalProgress,
   } from "../lib/autopilot.js";
 
   let summary = {
@@ -43,13 +45,78 @@
     objective = "",
     goalCost = "1",
     goalMinutes = "10";
+  let advancedGoal = false;
+  let goalRequest = "";
+  let nextStep = 1;
+  let goalSteps = [];
+
+  let resolution = {};
+  const resolutionFor = (task) => (resolution[task.id] ??= { status: "succeeded", evidence: "", cost: "", seconds: "" });
+  function setResolution(task, field, value) {
+    resolution = { ...resolution, [task.id]: { ...resolutionFor(task), [field]: value } };
+  }
+  async function resolveTask(goalRecord, task) {
+    const r = resolutionFor(task);
+    const cost = Number(r.cost), seconds = Number(r.seconds);
+    await action(
+      "Record outcome",
+      async () => {
+        if (!r.evidence.trim() || r.cost === "" || r.seconds === "" || !Number.isFinite(cost) || cost < 0 || !Number.isFinite(seconds) || seconds < 0)
+          throw new Error("Enter the evidence and the measured cost and seconds. Unmeasured steps stay failed.");
+        const out = await post(`/goals/${segment(goalRecord.id)}/tasks/${segment(task.id)}/resolve`, {
+          status: r.status,
+          evidence: r.evidence.trim(),
+          cost_usd: cost,
+          duration_ms: Math.round(seconds * 1000),
+        });
+        delete resolution[task.id];
+        resolution = resolution;
+        return out;
+      },
+      `Record this outcome for “${task.title}”? The step will not be retried. Later steps resume only if the outcome is succeeded.`,
+    );
+  }
+  function addGoalStep() {
+    goalSteps = [...goalSteps, {
+      id: `step-${nextStep++}`,
+      title: "",
+      prompt: "",
+      agent_id: "",
+    }];
+  }
+
+  async function draftGoal() {
+    if (busy || !goalRequest.trim()) return;
+    busy = true;
+    error = "";
+    notice = "";
+    try {
+      const { draft } = await post("/goals/draft", { request: goalRequest.trim() });
+      goalTitle = draft.title;
+      objective = draft.objective;
+      advancedGoal = false;
+      goalSteps = draft.steps.map((step) => ({
+        id: `step-${nextStep++}`,
+        title: step.title,
+        prompt: step.prompt,
+        agent_id: step.agent_id,
+      }));
+      notice = "Draft ready. Review each step, then save it. Nothing is saved or started yet.";
+    } catch (e) {
+      error = e.message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  addGoalStep();
   let tasksJSON =
     '[\n  {"id":"research","title":"Research","agent_id":"your-agent","prompt":"Investigate the objective and cite evidence","depends_on":[],"budget":{"max_cost_usd":0.5,"max_duration_ms":240000}},\n  {"id":"review","title":"Review","agent_id":"reviewer-agent","prompt":"Check the dependency results","depends_on":["research"],"budget":{"max_cost_usd":0.5,"max_duration_ms":240000}}\n]';
   const tabs = [
     ["proofs", "Run proofs"],
     ["releases", "Releases"],
     ["learning", "Regression checks"],
-    ["goals", "Goal teams"],
+    ["goals", "Goals"],
     ["undo", "Safe Undo"],
   ];
   const segment = encodeURIComponent;
@@ -106,12 +173,13 @@
     busy = true;
     error = "";
     notice = "";
+    let failure = "";
     try {
       const result = await operation();
       notice = label + " completed.";
       return result;
     } catch (e) {
-      error =
+      failure =
         e.message +
         (e.body?.gates?.reasons?.length
           ? ": " + e.body.gates.reasons.join("; ")
@@ -119,6 +187,8 @@
     } finally {
       busy = false;
       await refresh();
+      // refresh() clears the error banner, so show the failure after it.
+      if (failure) error = failure;
     }
   }
   async function createVersion() {
@@ -182,14 +252,19 @@
     await action(
       "Create goal team",
       async () => {
+        const budget = {
+          max_cost_usd: Number(goalCost),
+          max_duration_ms: Number(goalMinutes) * 60000,
+        };
+        if (goalCost == null || !Number.isFinite(budget.max_cost_usd) || budget.max_cost_usd < 0 ||
+            !Number.isInteger(budget.max_duration_ms) || budget.max_duration_ms <= 0) {
+          throw new Error("Enter a non-negative inference budget and a positive time limit.");
+        }
         await post("/goals", {
-          title: goalTitle,
-          objective,
-          budget: {
-            max_cost_usd: Number(goalCost),
-            max_duration_ms: Number(goalMinutes) * 60000,
-          },
-          tasks: parseGoalTasks(tasksJSON),
+          title: goalTitle.trim(),
+          objective: objective.trim(),
+          budget,
+          tasks: advancedGoal ? parseGoalTasks(tasksJSON) : orderedGoalTasks(goalSteps, budget),
         });
       },
       "Save this bounded task graph as a draft? Starting it is a separate action.",
@@ -573,10 +648,10 @@
     </section>
   {:else if section === "goals"}
     <section class="panel">
-      <h2>One goal. A bounded team.</h2>
+      <h2>Plan a goal</h2>
       <p>
-        Dependency-ready tasks execute in order. Each requires a verified
-        real-run proof. Missing measurements or interrupted work stop progress.
+        Define what you want to achieve and assign each step to an agent.
+        Review the draft before starting the goal.
       </p>
       <div class="form-grid">
         <label>Title<input bind:value={goalTitle} /></label><label
@@ -584,7 +659,7 @@
         ><label
           >Total inference budget (USD)<input
             type="number"
-            min="0.01"
+            min="0"
             step="0.01"
             bind:value={goalCost}
           /></label
@@ -596,19 +671,43 @@
           /></label
         >
       </div>
-      <label
-        >Task graph (JSON)<textarea
-          class="code"
-          rows="9"
-          bind:value={tasksJSON}
-        ></textarea></label
-      ><button
-        class="btn primary"
-        disabled={busy || !goalTitle || !objective}
-        on:click={createGoal}>Save goal draft</button
-      >
+      <label>Describe the goal<textarea rows="3" bind:value={goalRequest} placeholder="For example: research three options for a trip to Lisbon, then have a reviewer check them"></textarea></label>
+      <button class="btn" disabled={busy || !goalRequest.trim()} on:click={draftGoal}>Draft plan from description</button>
+      <p>A draft only fills this form. Nothing is saved or started until you save and start it.</p>
+      <label class="inline"><input type="checkbox" bind:checked={advancedGoal} /> Use an advanced task graph</label>
+      {#if advancedGoal}
+        <label>Task graph (JSON)<textarea class="code" rows="9" bind:value={tasksJSON}></textarea></label>
+      {:else}
+        <p>Steps run in order and share the goal’s budget and deadline. Each step receives the preceding step’s result.</p>
+        {#if !agents.length}<p>Create an agent before assigning a step.</p>{/if}
+        {#each goalSteps as step, index (step.id)}
+          <article class="task">
+            <div class="actions">
+              <strong>Step {index + 1}</strong>
+              {#if goalSteps.length > 1}
+                <button class="btn" aria-label={`Remove step ${index + 1}`}
+                  on:click={() => goalSteps = goalSteps.filter((candidate) => candidate.id !== step.id)}>Remove</button>
+              {/if}
+            </div>
+            <div class="form-grid">
+              <label>Step title<input bind:value={step.title} /></label>
+              <label>Agent<select bind:value={step.agent_id}>
+                <option value="">Choose an agent</option>
+                {#each agents as agent}<option value={agent.id}>{agent.name || agent.id}</option>{/each}
+              </select></label>
+            </div>
+            <label>Instructions<textarea rows="3" bind:value={step.prompt}></textarea></label>
+          </article>
+        {/each}
+        <button class="btn" disabled={busy || goalSteps.length >= 64} on:click={addGoalStep}>Add step</button>
+      {/if}
+      <button class="btn primary"
+        disabled={busy || !goalTitle.trim() || !objective.trim() ||
+          (!advancedGoal && goalSteps.some((step) => !step.title.trim() || !step.prompt.trim() ||
+            !agents.some((agent) => agent.id === step.agent_id)))}
+        on:click={createGoal}>Save goal draft</button>
     </section>
-    {#each goals as g}<section class="panel">
+    {#each goals as g (g.id)}<section class="panel">
         <div class="release">
           <div>
             <h2>{g.title}</h2>
@@ -616,6 +715,9 @@
           </div>
           <span class="pill">{g.status}</span>
         </div>
+        <p>{goalProgress(g).verified} of {g.tasks.length} steps verified</p>
+        <p><strong>{goalProgress(g).next_action}</strong></p>
+        {#if goalProgress(g).attention}<p class="danger">{goalProgress(g).attention}</p>{/if}
         <p>
           {money(g.cost_usd)} of {money(g.budget.max_cost_usd)} · {(
             g.duration_ms / 1000
@@ -632,9 +734,30 @@
                 <summary>Result</summary>
                 <pre>{task.result}</pre>
               </details>{/if}
+            {#if task.status === "blocked" && g.status === "running"}
+              <div class="form-grid">
+                <label>Verified outcome<select value={resolutionFor(task).status} on:change={(e) => setResolution(task, "status", e.currentTarget.value)}>
+                  <option value="succeeded">Succeeded: the external change is confirmed</option>
+                  <option value="failed">Failed: the change did not happen</option>
+                </select></label>
+                <label>Cost (USD) measured<input type="number" min="0" step="0.0001" value={resolutionFor(task).cost} on:input={(e) => setResolution(task, "cost", e.currentTarget.value)} /></label>
+                <label>Seconds measured<input type="number" min="0" step="1" value={resolutionFor(task).seconds} on:input={(e) => setResolution(task, "seconds", e.currentTarget.value)} /></label>
+              </div>
+              <label>Evidence you checked<textarea rows="2" value={resolutionFor(task).evidence} on:input={(e) => setResolution(task, "evidence", e.currentTarget.value)}></textarea></label>
+              <button class="btn" disabled={busy} on:click={() => resolveTask(g, task)}>Record outcome</button>
+            {/if}
           </article>{/each}
         <div class="actions">
-          {#if g.status === "draft"}<button
+          {#if g.status === "running" && !g.tasks.some((task) => task.status === "blocked") && !goalProgress(g).running}<button
+              class="btn primary"
+              disabled={busy}
+              on:click={() =>
+                action(
+                  "Resume goal",
+                  () => post(`/goals/${segment(g.id)}/resume`),
+                  "Resume this goal? Completed steps are kept and no interrupted step is retried.",
+                )}>Resume</button
+            >{/if}{#if g.status === "draft"}<button
               class="btn primary"
               disabled={busy}
               on:click={() =>

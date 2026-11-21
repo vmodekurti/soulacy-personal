@@ -138,7 +138,7 @@ func TestCall_OtherFailuresDoNotFlagCredential(t *testing.T) {
 func TestLooksLikeAuthFailure(t *testing.T) {
 	for _, yes := range []string{
 		`http 401: {"Error":"Missing API key"}`, "HTTP 403 Forbidden", "Unauthorized", "unauthorised",
-		"Missing API key. Use Authorization: Bearer", "Invalid or expired access token.", "authentication failed",
+		"Missing API key. Use Authorization: Bearer", "Invalid or expired access token.", "authentication failed", `{"error":"invalid_grant"}`,
 	} {
 		if !looksLikeAuthFailure(yes) {
 			t.Errorf("%q should look like an auth failure", yes)

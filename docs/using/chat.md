@@ -119,9 +119,9 @@ A denial fails that tool call (the agent is told it was denied); an approval let
 !!! warning
     Confirmation needs an interactive channel to deliver the prompt. Without
     one (for example a plain non-streaming request or a scheduled run), required
-    confirmation is denied by default. `unattended: true` explicitly opts an
-    agent into auto-approval in that situation and records it in the audit log.
-    Do not enable unattended execution merely to dismiss an approval error.
+    confirmation is denied and recorded in the audit log. Open the agent in
+    interactive Chat to review the action. Existing `unattended` settings
+    do not grant approval.
 
 ## Sharing a conversation
 

@@ -275,7 +275,7 @@ func validateToolSafety(report *Report, def *agent.Definition) {
 	sort.Strings(unconfirmed)
 	report.add(Warn, "confirm_tools",
 		fmt.Sprintf("high-risk built-in tool(s) can run without an explicit confirmation gate: %s", strings.Join(unconfirmed, ", ")),
-		"add these tools to confirm_tools, use confirm_tools: [all], or enable unattended only for trusted scheduled automation",
+		"add these tools to confirm_tools or use confirm_tools: [all]; run confirmation-gated actions in interactive Chat",
 		append([]string{"all"}, unconfirmed...),
 	)
 }

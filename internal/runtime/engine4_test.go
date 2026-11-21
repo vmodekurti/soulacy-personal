@@ -526,7 +526,7 @@ func TestConfirmSenderFrom_AbsentReturnsNotOK(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// engine.go — maybeConfirm: no confirm sender present (deny unless unattended)
+// engine.go — maybeConfirm: no confirm sender present (deny even when unattended)
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestMaybeConfirm_NoSenderDeniesByDefault(t *testing.T) {
@@ -543,7 +543,7 @@ func TestMaybeConfirm_NoSenderDeniesByDefault(t *testing.T) {
 	}
 }
 
-func TestMaybeConfirm_NoSenderUnattendedAutoApproves(t *testing.T) {
+func TestMaybeConfirm_NoSenderUnattendedDenies(t *testing.T) {
 	e := newMinimalEngine(t)
 	def := &agent.Definition{
 		ID:           "scheduled-guarded",
@@ -553,8 +553,8 @@ func TestMaybeConfirm_NoSenderUnattendedAutoApproves(t *testing.T) {
 	err := e.maybeConfirm(context.Background(), def, message.ToolCall{
 		ID: "call-1", Name: "dangerous_op",
 	})
-	if err != nil {
-		t.Fatalf("maybeConfirm without sender should auto-approve for unattended agents, got error: %v", err)
+	if err == nil {
+		t.Fatal("maybeConfirm without sender should deny for unattended agents")
 	}
 }
 
@@ -569,15 +569,15 @@ func TestDynamicConfirm_NoSenderDeniesByDefault(t *testing.T) {
 	}
 }
 
-func TestDynamicConfirm_UnattendedAutoApproves(t *testing.T) {
+func TestDynamicConfirm_UnattendedDenies(t *testing.T) {
 	e := newMinimalEngine(t)
 	def := &agent.Definition{ID: "scheduled-bot", Unattended: true}
-	// No confirm sender (e.g. a scheduled run). Unattended → auto-approve.
+	// No confirm sender (e.g. a scheduled run). Unattended still requires approval.
 	err := e.dynamicConfirm(context.Background(), def, message.ToolCall{
 		ID: "c", Name: "shell_exec",
 	}, "privileged system action")
-	if err != nil {
-		t.Fatalf("unattended agent should auto-approve guardrail confirm, got: %v", err)
+	if err == nil {
+		t.Fatal("guardrail confirmation should deny for unattended agents")
 	}
 }
 

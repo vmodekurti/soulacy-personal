@@ -416,16 +416,9 @@ func checkUnattended(draft Draft, add func(sev, kind, node, msg, fix string)) {
 	if len(sensitive) == 0 {
 		return
 	}
-	if draft.Unattended {
-		// Opted in: explain what that means rather than warning about a failure.
-		add("warn", "confirmation", strings.Join(sensitive, ", "),
-			"Unattended mode is ON: this scheduled agent's system/network step(s) will run automatically without asking for approval.",
-			"Leave Unattended on for hands-off automation; turn it off if you'd rather these steps be approved manually (note: scheduled runs then can't complete those steps).")
-		return
-	}
 	add("warn", "confirmation", strings.Join(sensitive, ", "),
-		"This scheduled agent includes step(s) that act on your system or the network. A scheduled run has nobody to approve them, so they will be DENIED and the run will fail.",
-		"Turn on Unattended mode to let these steps run automatically (only if you trust them), or run this agent manually instead of on a schedule.")
+		"This scheduled agent includes step(s) that act on your system or the network. Any step that requires confirmation is blocked when no one can approve it.",
+		"Use interactive Chat for steps that require confirmation, or remove them from the schedule.")
 }
 
 // runEntrypointRe matches a top-level (column-0) `def run(` definition — the

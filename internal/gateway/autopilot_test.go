@@ -49,8 +49,13 @@ func TestAutopilotEncodedProofAndProposalIDs(t *testing.T) {
 
 func newAutopilotGateway(t *testing.T) (*Server, *fakeLLMProvider) {
 	t.Helper()
+	return newAutopilotGatewayAt(t, filepath.Join(t.TempDir(), "autopilot.db"))
+}
+
+func newAutopilotGatewayAt(t *testing.T, dbPath string) (*Server, *fakeLLMProvider) {
+	t.Helper()
 	s, p := newTestGatewayWithLLM(t, "secret")
-	store, err := autopilot.NewStore(filepath.Join(t.TempDir(), "autopilot.db"))
+	store, err := autopilot.NewStore(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,4 +203,104 @@ func containsJSON(raw string, values ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestAutopilotDraftGoalNeverSavesOrStarts(t *testing.T) {
+	s, _ := newAutopilotGateway(t)
+	status, body := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/draft", "secret", `{"request":"Research a trip and review it"}`)
+	if status == 201 || status == 202 {
+		t.Fatalf("draft must not persist or start a goal: %d %v", status, body)
+	}
+	if status == 200 && body["saved"] != false {
+		t.Fatalf("draft response must say it is unsaved: %v", body)
+	}
+	if status != 200 && status != 422 && status != 502 {
+		t.Fatalf("unexpected status %d: %v", status, body)
+	}
+	status, list := gatewayJSON(t, s, "GET", "/api/v1/autopilot/goals", "secret", "")
+	if status != 200 {
+		t.Fatal(list)
+	}
+	if goals, _ := list["goals"].([]any); len(goals) != 0 {
+		t.Fatalf("draft left goals behind: %v", goals)
+	}
+}
+
+func TestAutopilotGoalRestartBlocksThenResumesAfterOperatorEvidence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "autopilot.db")
+	s, p := newAutopilotGatewayAt(t, dbPath)
+	body := `{"title":"Restart team","objective":"Survive a restart","budget":{"max_cost_usd":2,"max_duration_ms":600000},"tasks":[{"id":"first","title":"First","agent_id":"verified","prompt":"first task","depends_on":[],"budget":{"max_cost_usd":1,"max_duration_ms":300000}},{"id":"second","title":"Second","agent_id":"verified","prompt":"second task","depends_on":["first"],"budget":{"max_cost_usd":1,"max_duration_ms":300000}}]}`
+	status, goal := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals", "secret", body)
+	if status != 201 {
+		t.Fatalf("create=%d %v", status, goal)
+	}
+	id := goal["id"].(string)
+	ctx := context.Background()
+	if _, err := s.autopilotStore.StartGoal(ctx, "admin", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.autopilotStore.StartGoalTask(ctx, "admin", id, "first", "crashed-run"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a gateway crash: close the store and reopen the same database.
+	_ = s.autopilotStore.Close()
+	restarted, err := autopilot.NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	s.SetAutopilotStore(restarted)
+	s.engine.SetAutopilot(restarted, nil)
+
+	status, goal = gatewayJSON(t, s, "GET", "/api/v1/autopilot/goals/"+id, "secret", "")
+	if status != 200 || goal["status"] != "running" {
+		t.Fatalf("restarted goal=%d %v", status, goal)
+	}
+	tasks := goal["tasks"].([]any)
+	if first := tasks[0].(map[string]any); first["status"] != "blocked" {
+		t.Fatalf("interrupted step not quarantined: %v", first)
+	}
+	if status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/resume", "secret", `{}`); status != 409 {
+		t.Fatalf("resume while blocked=%d %v", status, out)
+	}
+	if status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/tasks/second/resolve", "secret", `{"status":"succeeded","evidence":"x","cost_usd":0,"duration_ms":0}`); status != 409 {
+		t.Fatalf("resolving a step that is not blocked=%d %v", status, out)
+	}
+	if status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/tasks/first/resolve", "secret", `{"status":"succeeded","evidence":"","cost_usd":0,"duration_ms":0}`); status != 400 {
+		t.Fatalf("resolution without evidence=%d %v", status, out)
+	}
+	if status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/tasks/first/resolve", "secret", `{"status":"succeeded","evidence":"Checked the external system: the write landed once"}`); status != 400 {
+		t.Fatalf("resolution without measurements=%d %v", status, out)
+	}
+	status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/tasks/first/resolve", "secret", `{"status":"succeeded","evidence":"Checked the external system: the write landed once","cost_usd":0.1,"duration_ms":100}`)
+	if status != 202 {
+		t.Fatalf("resolve=%d %v", status, out)
+	}
+	if out["resumed"] != true {
+		t.Fatalf("resolution did not resume the goal: %v", out)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		g, err := restarted.GetGoal(ctx, "admin", id)
+		if err == nil && g.Status == autopilot.GoalSucceeded {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	g, err := restarted.GetGoal(ctx, "admin", id)
+	if err != nil || g.Status != autopilot.GoalSucceeded {
+		t.Fatalf("goal did not finish after resume: %+v err=%v", g, err)
+	}
+	p.mu.Lock()
+	calls := len(p.requests)
+	p.mu.Unlock()
+	// Only the downstream step ran: the interrupted step was never replayed.
+	if calls != 1 {
+		t.Fatalf("provider calls=%d, want 1 (interrupted step must not replay)", calls)
+	}
+	if status, out := gatewayJSON(t, s, "POST", "/api/v1/autopilot/goals/"+id+"/resume", "secret", `{}`); status != 409 {
+		t.Fatalf("resume of finished goal=%d %v", status, out)
+	}
 }

@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -281,4 +283,177 @@ func (s *Server) closeAutopilot() {
 	}
 	s.autopilotMu.Unlock()
 	s.autopilotWG.Wait()
+}
+
+// handleAutopilotDraftGoal turns a plain-language request into a reviewable
+// plan. It only returns the draft: nothing is saved or started until the owner
+// reviews it and uses the normal create-goal action.
+func (s *Server) handleAutopilotDraftGoal(c *fiber.Ctx) error {
+	if _, err := s.autopilotOwner(c); err != nil {
+		return err
+	}
+	var body struct {
+		Request string `json:"request"`
+	}
+	if len(c.Body()) > 16*1024 || c.BodyParser(&body) != nil {
+		return s.errMsg(c, 400, "invalid request")
+	}
+	agents := []autopilot.DraftAgent{}
+	for _, def := range s.loader.All() {
+		if s.loader.IsBuiltin(def.ID) || !s.autopilotCanAccess(c, def.ID, rbac.ActionWrite) {
+			continue
+		}
+		agents = append(agents, autopilot.DraftAgent{ID: def.ID, Name: def.Name, Description: def.Description})
+	}
+	draft, err := autopilot.DraftGoalPlan(c.UserContext(), s.studioLLM(c), body.Request, agents)
+	switch {
+	case errors.Is(err, autopilot.ErrDraftUnusable):
+		return s.errMsg(c, 422, "The model could not draft a usable plan. Rephrase the goal or write the steps yourself.")
+	case errors.Is(err, autopilot.ErrInvalid):
+		return s.autopilotError(c, err)
+	case err != nil:
+		return s.errMsg(c, 502, "The drafting model is unavailable right now.")
+	}
+	return c.JSON(fiber.Map{"draft": draft, "saved": false})
+}
+
+// startGoalExecution launches the coordinator for a running goal that has no
+// active executor (for example after a restart or an operator resolution). It
+// refuses to double-start a goal and charges the remaining time budget, which
+// includes any downtime since the goal first started.
+func (s *Server) startGoalExecution(c *fiber.Ctx, owner string, g autopilot.Goal) error {
+	if !s.canAccessGoal(c, g, rbac.ActionWrite) {
+		return s.errMsg(c, 403, "write access to every team agent is required")
+	}
+	if s.llmRouter == nil || !s.llmRouter.SupportsRunCostBudgets() {
+		return s.errMsg(c, 503, "goal execution requires a working inference cost controller")
+	}
+	remaining := time.Duration(g.Budget.MaxDurationMS) * time.Millisecond
+	if g.StartedAt != nil {
+		remaining -= time.Since(*g.StartedAt)
+	}
+	if remaining <= 0 {
+		_, _ = s.autopilotStore.FailGoal(c.UserContext(), owner, g.ID, "time budget exhausted before the goal could resume")
+		return s.errMsg(c, 409, "the goal's time budget is exhausted; it has been failed")
+	}
+	for _, task := range g.Tasks {
+		if err := s.claimSession(c, task.AgentID, goalSession(g.ID, task.ID)); err != nil {
+			return err
+		}
+	}
+	ctx := withRequestPrincipal(c, context.Background())
+	ctx = runtime.WithPrincipal(ctx, runtime.Principal{Subject: owner, Role: autopilotRole(c), Scopes: autopilotScopes(c)})
+	ctx, cancel := context.WithTimeout(ctx, remaining)
+	ctx = llm.WithRunCostBudget(ctx, int64(g.Budget.MaxCostUSD*1e6))
+	key := owner + "\x00" + g.ID
+	s.autopilotMu.Lock()
+	if s.autopilotClosing {
+		s.autopilotMu.Unlock()
+		cancel()
+		return s.errMsg(c, 503, "gateway is shutting down")
+	}
+	if _, active := s.autopilotGoals[key]; active {
+		s.autopilotMu.Unlock()
+		cancel()
+		return s.errMsg(c, 409, "goal is already running")
+	}
+	if s.autopilotGoals == nil {
+		s.autopilotGoals = map[string]context.CancelFunc{}
+	}
+	s.autopilotGoals[key] = cancel
+	s.autopilotWG.Add(1)
+	s.autopilotMu.Unlock()
+	go func() {
+		defer s.autopilotWG.Done()
+		defer cancel()
+		defer func() { s.autopilotMu.Lock(); delete(s.autopilotGoals, key); s.autopilotMu.Unlock() }()
+		s.executeAutopilotGoal(ctx, g)
+	}()
+	return nil
+}
+
+// handleAutopilotResumeGoal restarts a running goal whose executor is gone.
+// It refuses while a crash-uncertain step is unresolved: resuming must never
+// skip the review that the blocked step requires.
+func (s *Server) handleAutopilotResumeGoal(c *fiber.Ctx) error {
+	owner, err := s.autopilotOwner(c)
+	if err != nil {
+		return err
+	}
+	g, err := s.autopilotStore.GetGoal(c.UserContext(), owner, c.Params("id"))
+	if err != nil {
+		return s.autopilotError(c, err)
+	}
+	if g.Status != autopilot.GoalRunning {
+		return s.errMsg(c, 409, "only a running goal can be resumed")
+	}
+	for _, task := range g.Tasks {
+		if task.Status == autopilot.GoalTaskBlocked {
+			return s.errMsg(c, 409, "resolve the blocked step before resuming")
+		}
+	}
+	if err := s.startGoalExecution(c, owner, g); err != nil {
+		return err
+	}
+	return c.Status(202).JSON(g)
+}
+
+// handleAutopilotResolveGoalTask records an operator's verdict on a
+// crash-uncertain step from external evidence. The step is never retried; a
+// successful verdict lets downstream steps resume, and the goal resumes now.
+func (s *Server) handleAutopilotResolveGoalTask(c *fiber.Ctx) error {
+	owner, err := s.autopilotOwner(c)
+	if err != nil {
+		return err
+	}
+	taskID, err := url.PathUnescape(c.Params("task"))
+	if err != nil || taskID == "" {
+		return s.errMsg(c, 400, "invalid task identifier")
+	}
+	g, err := s.autopilotStore.GetGoal(c.UserContext(), owner, c.Params("id"))
+	if err != nil {
+		return s.autopilotError(c, err)
+	}
+	if !s.canAccessGoal(c, g, rbac.ActionWrite) {
+		return s.errMsg(c, 403, "write access to every team agent is required")
+	}
+	var body struct {
+		Status     string   `json:"status"`
+		Evidence   string   `json:"evidence"`
+		CostUSD    *float64 `json:"cost_usd"`
+		DurationMS *int64   `json:"duration_ms"`
+	}
+	if len(c.Body()) > 64*1024 || c.BodyParser(&body) != nil {
+		return s.errMsg(c, 400, "invalid resolution")
+	}
+	evidence := strings.TrimSpace(body.Evidence)
+	if evidence == "" || len(evidence) > 2000 {
+		return s.errMsg(c, 400, "evidence describing the external outcome is required (up to 2000 characters)")
+	}
+	if body.CostUSD == nil || body.DurationMS == nil {
+		return s.errMsg(c, 400, "cost_usd and duration_ms are required; unmeasured steps stay failed")
+	}
+	req := autopilot.FinishGoalTaskRequest{Subject: owner, GoalID: g.ID, TaskID: taskID, CostUSD: body.CostUSD, DurationMS: body.DurationMS, ProofID: "operator-evidence"}
+	switch body.Status {
+	case string(autopilot.GoalTaskSucceeded):
+		req.Status = autopilot.GoalTaskSucceeded
+		req.Result = boundedUTF8(redact.Text(evidence), 16*1024)
+	case string(autopilot.GoalTaskFailed):
+		req.Status = autopilot.GoalTaskFailed
+		req.Error = boundedUTF8(redact.Text(evidence), 2000)
+	default:
+		return s.errMsg(c, 400, "status must be succeeded or failed")
+	}
+	updated, err := s.autopilotStore.ResolveBlockedGoalTask(c.UserContext(), req)
+	if err != nil {
+		return s.autopilotError(c, err)
+	}
+	if updated.Status != autopilot.GoalRunning {
+		return c.JSON(fiber.Map{"goal": updated, "resumed": false})
+	}
+	if err := s.startGoalExecution(c, owner, updated); err != nil {
+		// The verdict is already durable; report why execution did not resume.
+		return c.Status(202).JSON(fiber.Map{"goal": updated, "resumed": false, "resume_error": err.Error()})
+	}
+	return c.Status(202).JSON(fiber.Map{"goal": updated, "resumed": true})
 }

@@ -41,7 +41,7 @@ func TestUnattended_ScheduledPythonSystemWarns(t *testing.T) {
 	}
 }
 
-func TestUnattended_OnExplainsInsteadOfFailure(t *testing.T) {
+func TestUnattended_LegacyFlagStillWarns(t *testing.T) {
 	d := Draft{
 		Unattended: true,
 		Trigger:    Trigger{Type: "schedule", Config: map[string]any{"cron": "0 7 * * *"}},
@@ -59,8 +59,8 @@ func TestUnattended_OnExplainsInsteadOfFailure(t *testing.T) {
 	if msg == "" {
 		t.Fatal("expected a confirmation warning even when unattended is on")
 	}
-	if !strings.Contains(strings.ToLower(msg), "unattended mode is on") {
-		t.Errorf("unattended-on message should explain it's on, got %q", msg)
+	if !strings.Contains(msg, "requires confirmation is blocked") {
+		t.Errorf("warning should explain that required approval still blocks execution, got %q", msg)
 	}
 }
 
