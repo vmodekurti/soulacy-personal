@@ -42,9 +42,12 @@ func (s *Server) registerAutopilotRoutes(api fiber.Router) {
 	api.Post("/autopilot/agents/:id/freeze", write, s.handleAutopilotFreeze)
 	api.Get("/autopilot/goals", read, s.handleAutopilotGoals)
 	api.Post("/autopilot/goals", write, s.handleAutopilotCreateGoal)
+	api.Post("/autopilot/goals/draft", write, s.handleAutopilotDraftGoal)
 	api.Get("/autopilot/goals/:id", read, s.handleAutopilotGoal)
 	api.Post("/autopilot/goals/:id/run", write, s.handleAutopilotRunGoal)
 	api.Post("/autopilot/goals/:id/cancel", write, s.handleAutopilotCancelGoal)
+	api.Post("/autopilot/goals/:id/resume", write, s.handleAutopilotResumeGoal)
+	api.Post("/autopilot/goals/:id/tasks/:task/resolve", write, s.handleAutopilotResolveGoalTask)
 }
 
 func (s *Server) autopilotOwner(c *fiber.Ctx) (string, error) {
