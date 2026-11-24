@@ -133,7 +133,17 @@
   padding: 6px 11px;
   border: 1px solid var(--border);
   text-align: left;
+  /* The body's `overflow-wrap: anywhere` lets a cell shrink to one character,
+     so a short column next to a long one was squeezed until "RANK" and
+     "$599.99" split mid-word (#404). `break-word` keeps whole words as the
+     minimum width; the long column wraps at spaces instead. */
+  word-break: normal;
+  overflow-wrap: break-word;
 }
+/* Headers are single labels: never split them. */
+.markdown-body th { white-space: nowrap; }
+/* A pasted address is the one thing in a cell that may still break anywhere. */
+.markdown-body td a { overflow-wrap: anywhere; }
 .markdown-body th {
   background: var(--bg-elev-2);
   font-weight: 650;
