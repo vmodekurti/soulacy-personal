@@ -12,6 +12,46 @@
   import { deltaMetrics, deltaLabel, deltaTitle } from '../lib/chatmetrics.js'
   import { parseMarkdown, richRenderer } from '../lib/markdown.js'
   import { explainConfirmRequest } from '../lib/explainCommand.js'
+  import { connectProposal } from '../lib/connectproposal.js'
+  import { slimThinking, throttleTrailing, tokenBatcher } from '../lib/chatpersist.js'
+  import { summonMatches } from '../lib/focusshell.js'
+  import ArtifactCard from '../lib/ArtifactCard.svelte'
+  import { artifactSubtitle, artifactTitle, followUpsFor } from '../lib/replyextras.js'
+
+  // True inside the chat-first shell, where this conversation is the home
+  // screen. "/" and the command palette then also open other screens, which
+  // the shell draws beside the conversation.
+  export let focusShell = false
+  function summon(id) { location.hash = '#' + id }
+
+  // The chat-first shell hides this page's own header and drives these from
+  // its top bar and menu instead.
+  export function newChat() { startThread() }
+  export function showHistory() { toggleChatList() }
+  export function showDetails() { missionDetailsOpen = !missionDetailsOpen }
+
+  // In the chat-first shell the files a conversation produced appear as cards
+  // under the latest reply, so they are fetched once per finished turn instead
+  // of waiting for someone to open the outputs drawer.
+  let focusArtifactsKey = ''
+  $: if (focusShell && activeThread?.agentId && activeThread?.sessionId && !isSending && activeThread.messages?.length) {
+    const key = `${activeThread.id}:${activeThread.sessionId}:${activeThread.messages.length}`
+    if (key !== focusArtifactsKey) {
+      focusArtifactsKey = key
+      loadArtifacts(activeThread.id, activeThread.agentId, activeThread.sessionId)
+    }
+  }
+
+  // "Tools" in the chat-first composer opens the same picker "/" does.
+  async function openTools() {
+    input = '/'
+    skillQuery = ''
+    skillIndex = 0
+    loadSkillsOnce()
+    await tick()
+    composerEl?.focus()
+    composerEl?.setSelectionRange(1, 1)
+  }
   import { searchSkills, parseSlashQuery, applySkillChoice } from '../lib/skillsearch.js'
   import { modelAvailability } from '../lib/agentmodel.js'
   import { isChatTransportError, recoverDetachedChat } from '../lib/chatrecovery.js'
@@ -228,9 +268,9 @@
             attachments: m.attachments || null,
             runId: m.runId || '', responseId: m.responseId || '', feedback: m.feedback || 0,
             sourceResult: !!m.sourceResult,
-            // Keep the per-turn activity record with the message. Closed is the
-            // durable/default presentation; opening a trace is transient UI.
-            thinking: m.thinking ? { ...m.thinking, open: false } : null,
+            // Keep the per-turn activity record with the message, closed and
+            // bounded: recent events only, long tool output cut down (#402).
+            thinking: slimThinking(m.thinking),
           })),
         }
       }
@@ -268,8 +308,17 @@
     } catch (_) { return false }
   }
 
-  // Save whenever the threads or the active selection change (after hydration).
-  $: persistThreads($chatThreads, $chatActiveThreadId)
+  // Save when the threads or the active selection change (after hydration),
+  // but at most once every 1.5s. A long run updates the store thousands of
+  // times; saving every conversation on each one froze the tab (#402).
+  const persistSoon = throttleTrailing(persistThreads, 1500)
+  $: persistSoon($chatThreads, $chatActiveThreadId)
+  // Streamed tokens arrive far faster than the screen needs to change.
+  const streamTokens = tokenBatcher((tid, text) => {
+    // Tokens that arrive after the final reply has landed are dropped.
+    updateThread(tid, t => (t.sending ? { ...t, streamText: (t.streamText || '') + text } : t))
+    scrollBottom()
+  })
 
   function updateThread(threadId, fn) {
     chatThreads.update(ts => {
@@ -503,6 +552,8 @@
     { id: 'save-prompt', label: 'Save current input as a prompt', run: () => saveCurrentPrompt() },
     { id: 'prompts', label: 'Open saved prompts', run: () => promptsOpen = true },
     ...savedPrompts.map((p, i) => ({ id: 'sp' + i, label: 'Prompt: ' + p.title, run: () => usePrompt(p) })),
+    ...(focusShell ? summonMatches('', { limit: 99 }).concat(summonMatches('feed', { limit: 1 }))
+      .map(p => ({ id: 'open-' + p.id, label: 'Open ' + p.label, run: () => summon(p.id) })) : []),
   ]
   $: paletteFiltered = paletteCommands.filter(c => c.label.toLowerCase().includes(paletteQuery.toLowerCase()))
 
@@ -531,6 +582,11 @@
   let confirmRequest = null
   // Plain-English explanation of what approving the pending tool call would do.
   $: confirmExplain = confirmRequest ? explainConfirmRequest(confirmRequest) : null
+  // In the chat-first shell a request to connect something is a line in the
+  // conversation, not a dialog over it. Every other confirmation keeps the dialog.
+  $: connectAsk = focusShell ? connectProposal(confirmRequest) : null
+  let connectOpen = false
+  $: if (!confirmRequest) connectOpen = false
 
   // ── load agents once on mount ────────────────────────────────────────
   async function loadAgents() {
@@ -1123,7 +1179,24 @@
   let skillIndex    = 0
 
   $: skillMatches = skillQuery === null ? [] : searchSkills(skillList, skillQuery, { limit: 8 })
-  $: skillOpen    = skillQuery !== null && skillMatches.length > 0
+  // In the chat-first shell the same picker also finds screens. Screens come
+  // first: with the menu hidden, "/" is how you get anywhere.
+  $: screenMatches = focusShell && skillQuery !== null ? summonMatches(skillQuery, { limit: 6 }) : []
+  $: pickerRows = [
+    ...screenMatches.map(p => ({ kind: 'screen', key: 'screen:' + p.id, page: p })),
+    ...skillMatches.map(sk => ({ kind: 'skill', key: 'skill:' + sk.name, skill: sk })),
+  ]
+  $: skillOpen    = skillQuery !== null && pickerRows.length > 0
+
+  function choosePickerRow(row) {
+    if (!row) return
+    if (row.kind === 'skill') return chooseSkill(row.skill)
+    // Opening a screen is not a message: clear the "/…" so nothing is left to send.
+    input = ''
+    skillQuery = null
+    skillIndex = 0
+    summon(row.page.id)
+  }
 
   async function loadSkillsOnce() {
     if (skillsLoaded) return
@@ -1159,16 +1232,18 @@
     // would fire the message off half-typed instead of choosing a skill.
     if (skillOpen) {
       if (e.key === 'ArrowDown') {
-        e.preventDefault(); skillIndex = (skillIndex + 1) % skillMatches.length; return
+        e.preventDefault(); skillIndex = (skillIndex + 1) % pickerRows.length; return
       }
       if (e.key === 'ArrowUp') {
-        e.preventDefault(); skillIndex = (skillIndex - 1 + skillMatches.length) % skillMatches.length; return
+        e.preventDefault(); skillIndex = (skillIndex - 1 + pickerRows.length) % pickerRows.length; return
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault(); chooseSkill(skillMatches[skillIndex]); return
+        e.preventDefault(); choosePickerRow(pickerRows[skillIndex]); return
       }
       if (e.key === 'Escape') {
-        e.preventDefault(); skillQuery = null; return
+        // A lone "/" was put there by Tools (or typed to browse); dismissing
+        // the picker should not leave it behind as a message.
+        e.preventDefault(); skillQuery = null; if (input === '/') input = ''; return
       }
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
@@ -1365,16 +1440,15 @@
         if (ev.type === 'assistant.delta') {
           const tid = threadIdForRunEvent(ev)
           const tok = ev.payload?.text || ''
-          if (tid && tok) {
-            updateThread(tid, t => ({ ...t, streamText: (t.streamText || '') + tok }))
-            await scrollBottom()
-          }
+          streamTokens.push(tid, tok)
           return
         }
         const threadId = threadIdForRunEvent(ev)
         if (ev.type === 'run.artifact' && threadId) {
           const t = $chatThreads[threadId]
-          artifactPanelOpen = true
+          // The chat-first shell shows the file as a card under the reply
+          // instead of opening the outputs drawer over the conversation.
+          if (!focusShell) artifactPanelOpen = true
           if (t?.agentId && t?.sessionId) loadArtifacts(threadId, t.agentId, t.sessionId)
           return
         }
@@ -2186,11 +2260,17 @@
       await backfillAllThinking(activeThread.id, activeThread.agentId, activeThread.sessionId)
     }
     window.addEventListener('keydown', onGlobalKey)
+    window.addEventListener('pagehide', savePending)
     // Scroll to bottom when returning to a conversation already in progress
     await scrollBottom()
   })
 
+  // The throttled save may still be waiting when the tab is hidden or closed.
+  const savePending = () => persistSoon.flush()
+
   onDestroy(() => {
+    savePending()
+    if (typeof window !== 'undefined') window.removeEventListener('pagehide', savePending)
     unsubscribeGenieAsk()
     stopEvents = true
     if (ws) ws.close()
@@ -2312,7 +2392,7 @@
   </div>
 {/if}
 
-{#if confirmRequest}
+{#if confirmRequest && !connectAsk}
   <div class="confirm-modal-backdrop">
     <div class="confirm-modal">
       <div class="confirm-head">
@@ -2397,7 +2477,7 @@
   </div>
 {/if}
 
-<div class="page modern-chat">
+<div class="page modern-chat" class:focus={focusShell}>
   <div class="page-header">
     <div class="chat-brand">
       <button class="chat-list-toggle history-toggle" on:click={toggleChatList} title={chatListHidden ? 'Show mission history' : 'Hide mission history'} aria-pressed={!chatListHidden}>◷ <span>History</span></button>
@@ -2606,6 +2686,9 @@
     {/if}
 
     <div class="chat-main">
+  {#if focusShell && visibleMessages.length > 0}
+    <div class="focus-title">{activeThread?.title || agentName(activeThread?.agentId)}</div>
+  {/if}
   {#if activeThread?.branches?.length > 0}
     <div class="branches" role="tablist" aria-label="Conversation branches">
       {#each activeThread.branches as b (b.sessionId)}
@@ -2626,9 +2709,11 @@
       {#if visibleMessages.length === 0}
         <div class="empty">
           {#if activeThread?.agentId}
-            <div class="empty-avatar" aria-hidden="true">✦</div>
-            <h2 class="empty-title">Your AI gateway for <span>real work.</span></h2>
-            <p class="empty-sub">{activeThread.agentId === 'genie' ? 'Find job results, retrieve podcast links, and manage your agents. Core operational settings stay protected.' : 'Access your agents, your data, and the web in one secure workspace.'}</p>
+            <slot name="hero">
+              <div class="empty-avatar" aria-hidden="true">✦</div>
+              <h2 class="empty-title">Your AI gateway for <span>real work.</span></h2>
+              <p class="empty-sub">{activeThread.agentId === 'genie' ? 'Find job results, retrieve podcast links, and manage your agents. Core operational settings stay protected.' : 'Access your agents, your data, and the web in one secure workspace.'}</p>
+            </slot>
             <div class="suggestions">
               {#each promptsFor(activeThread.agentId, agents) as s}
                 <button class="suggestion" on:click={() => useSuggestion(s)}>{s}</button>
@@ -2735,6 +2820,8 @@
                     {:else if part.type === 'video'}
                       <!-- svelte-ignore a11y-media-has-caption -->
                       <video class="part-video" controls preload="metadata" src={partSrc(part)}></video>
+                    {:else if part.type === 'file' && focusShell}
+                      <ArtifactCard href={partSrc(part)} title={artifactTitle(part.name || part.url)} subtitle={artifactSubtitle({ name: part.name || part.url })} />
                     {:else if part.type === 'file'}
                       <a class="part-file" href={partSrc(part)} target="_blank" rel="noopener" download>
                         📎 {part.name || part.url || 'Download file'}
@@ -2743,11 +2830,21 @@
                   {/each}
                 </div>
               {/if}
+              {#if focusShell && msg.role === 'assistant' && mi === visibleMessages.length - 1 && currentArtifacts.length}
+                <div class="reply-artifacts" aria-label="Files from this conversation">
+                  {#each currentArtifacts as a (a.path)}
+                    <ArtifactCard title={artifactTitle(a.name || a.path)} subtitle={artifactSubtitle({ name: a.name || a.path, size_bytes: a.size_bytes })}
+                                  on:click={() => downloadArtifact(a)} />
+                  {/each}
+                </div>
+              {/if}
               {#if msg.thinking && !resolvedFailure}
                 <div class="thinking" class:open={msg.thinking.open}>
                   <button class="thinking-head" type="button" on:click={() => toggleThinking(msg.thinking)}>
                     <span class="chev">{msg.thinking.open ? '▾' : '▸'}</span>
-                    <span class="thinking-title">How this answer was made</span>
+                    <!-- A private conversation is answered by the model on the person's own
+                         machine; the existing line says so instead of adding a badge. -->
+                    <span class="thinking-title">{msg.metadata?.answered_locally === 'true' ? 'Answered privately, on your own machine' : 'How this answer was made'}</span>
                     <span class="thinking-meta">{thinkingSummary(msg.thinking)}</span>
                   </button>
                   {#if msg.thinking.open}
@@ -2800,6 +2897,16 @@
                     </div>
                   {/if}
                 </div>
+              {/if}
+              {#if focusShell && msg.role === 'assistant' && mi === visibleMessages.length - 1 && !isSending}
+                {@const nextSteps = followUpsFor(msg.text, { hasFiles: currentArtifacts.length > 0 || (msg.parts || []).some(p => p.type === 'file') })}
+                {#if nextSteps.length}
+                  <div class="reply-next" aria-label="Suggested next steps">
+                    {#each nextSteps as step (step.label)}
+                      <button class="reply-next-chip" on:click={() => send(step.prompt)}>{step.label}</button>
+                    {/each}
+                  </div>
+                {/if}
               {/if}
               <div class="bmeta">
                 <span class="btime">{fmtTime(msg.ts)}</span>
@@ -2890,6 +2997,24 @@
           </div>
         {/if}
       {/if}
+      {#if connectAsk}
+        <div class="connect-ask" role="group" aria-label="Connection request">
+          <p class="connect-title">{connectAsk.title}</p>
+          <p class="connect-text">{connectAsk.text} {connectAsk.note}</p>
+          {#if connectOpen}
+            <div class="connect-detail">
+              {#if connectAsk.intent}<p><span>For</span> {connectAsk.intent}</p>{/if}
+              {#if connectAsk.sites.length}<p><span>Sites</span> {connectAsk.sites.join(', ')}</p>{/if}
+              <p><span>Remove it</span> any time from Connectors in the menu.</p>
+            </div>
+          {/if}
+          <div class="connect-actions">
+            <button class="go" on:click={() => resolveConfirm(true)}>Connect</button>
+            <button on:click={() => resolveConfirm(false)}>Not now</button>
+            <button aria-expanded={connectOpen} on:click={() => (connectOpen = !connectOpen)}>Details</button>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Input -->
@@ -2920,22 +3045,33 @@
       <button class="attach-btn" on:click={() => fileInputEl?.click()} disabled={isSending || uploadingAttachment || !activeThread?.agentId} title="Attach files">
         {uploadingAttachment ? '…' : '+'}
       </button>
-      <button class="attach-btn saved-prompts-btn" on:click={() => promptsOpen = !promptsOpen} title="Saved prompts (⌘K for commands)">≣</button>
+      {#if focusShell}
+        <button class="tools-btn" on:mousedown|preventDefault on:click={openTools} disabled={!activeThread?.agentId}
+                title="Open a screen or use a skill" aria-haspopup="listbox" aria-expanded={skillOpen}>Tools <span aria-hidden="true">⌄</span></button>
+      {:else}
+        <button class="attach-btn saved-prompts-btn" on:click={() => promptsOpen = !promptsOpen} title="Saved prompts (⌘K for commands)">≣</button>
+      {/if}
       {#if skillOpen}
-        <div class="skill-pop" role="listbox" aria-label="Skills">
-          <div class="skill-pop-head">Skills · ↑↓ to move, Enter to insert, Esc to dismiss</div>
-          {#each skillMatches as sk, i}
+        <div class="skill-pop" role="listbox" aria-label={focusShell ? 'Screens and skills' : 'Skills'}>
+          <div class="skill-pop-head">{focusShell ? 'Screens and skills' : 'Skills'} · ↑↓ to move, Enter to {focusShell ? 'choose' : 'insert'}, Esc to dismiss</div>
+          {#each pickerRows as row, i (row.key)}
             <button
               class="skill-pop-row"
               class:sel={i === skillIndex}
               role="option"
               aria-selected={i === skillIndex}
               on:mouseenter={() => skillIndex = i}
-              on:click={() => chooseSkill(sk)}
+              on:mousedown|preventDefault
+              on:click={() => choosePickerRow(row)}
             >
-              <span class="skill-pop-name">/{sk.name}</span>
-              {#if sk.description}
-                <span class="skill-pop-desc">{sk.description}</span>
+              {#if row.kind === 'screen'}
+                <span class="skill-pop-name">{row.page.icon} {row.page.label}</span>
+                <span class="skill-pop-desc">Open beside this conversation</span>
+              {:else}
+                <span class="skill-pop-name">/{row.skill.name}</span>
+                {#if row.skill.description}
+                  <span class="skill-pop-desc">{row.skill.description}</span>
+                {/if}
               {/if}
             </button>
           {/each}
@@ -2947,11 +3083,11 @@
         on:keydown={onKeydown}
         on:input={onComposerInput}
         on:blur={() => setTimeout(() => skillQuery = null, 120)}
-        placeholder={mobileViewport ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'agent'}…` : `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)`}
+        placeholder={mobileViewport ? `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'agent'}…` : (focusShell ? 'Ask Soulacy, or tell it what you need done…' : `Message ${activeThread?.agentId ? agentName(activeThread.agentId) : 'the agent'}…  (Enter to send, / for skills)`)}
         rows={mobileViewport ? 1 : 2}
         disabled={isSending || !activeThread?.agentId}
       ></textarea>
-      <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={isSending} title="Start a voice conversation" aria-label="Start a voice conversation">🎤</button>
+      <button class="composer-voice" on:click={() => { if (voiceState === 'live' || sidecarProcessing || voicePlaybackState !== 'idle') voiceSessionOpen = true; else voiceClick() }} disabled={isSending} title="Start a voice conversation" aria-label="Start a voice conversation">{#if focusShell}<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></svg>{:else}🎤{/if}</button>
       {#if isSending}
         <button class="send-btn btn-danger" on:click={cancelSend} title="Stop this run">■</button>
       {:else}
@@ -2964,6 +3100,7 @@
         </button>
       {/if}
     </div>
+    {#if focusShell}<p class="focus-tagline">Your assistant. Your context. Your control.</p>{/if}
   </div>
   <aside class="agent-roster" aria-label="Available agents">
     <div class="agent-roster-head">
@@ -4343,6 +4480,11 @@
   .modern-chat .chat-wrap {
     border: 0; border-radius: 0; background: transparent; box-shadow: none;
   }
+  /* Chat-first shell: one column. The agent list and the tour button are the
+     workspace's furniture; the agent picker stays reachable under Details and
+     the Agents screen is one "/" away. */
+  .modern-chat.focus .agent-roster, .modern-chat.focus .header-tour { display: none; }
+  .modern-chat.focus .chat-workspace { grid-template-columns: minmax(0, 920px); }
   .modern-chat .chat-sidebar {
     border-color: var(--sl-line); background: var(--sl-surface);
   }
@@ -4549,5 +4691,81 @@
     .agent-card { min-width: 156px; grid-template-columns: 32px minmax(0, 1fr); padding: .45rem .55rem; }
     .agent-avatar { width: 32px; height: 32px; border-radius: 10px; }
     .agent-copy small, .agent-ready { display: none; }
+  }
+
+  /* ── Chat-first look ──────────────────────────────────────────────────
+     Last in the sheet and one class more specific than the workspace rules,
+     so the workspace styling above stays exactly as it was. The shell's top
+     bar and menu carry what this page's header did. */
+  .page.modern-chat.focus > .page-header { display: none; }
+  .page.modern-chat.focus .focus-title { padding: .9rem 1rem .2rem; text-align: center; color: var(--sl-text-dim); font-size: .95rem; font-weight: 500; }
+
+  .page.modern-chat.focus .msg-row { max-width: none; padding: 0 .5rem; }
+  .page.modern-chat.focus .msg-row.user .bubble {
+    padding: .6rem 1.1rem; border-color: transparent; border-radius: 20px;
+    color: var(--sl-text); background: var(--sl-accent-soft); box-shadow: none;
+  }
+  .page.modern-chat.focus .msg-row.user .bmeta, .page.modern-chat.focus .msg-row.user .act { color: var(--sl-text-dim); }
+  /* The assistant speaks on the page itself, marked by the brand, not boxed. */
+  .page.modern-chat.focus .msg-row:not(.user):not(.sys) { display: flex; align-items: flex-start; gap: .9rem; }
+  .page.modern-chat.focus .msg-row:not(.user):not(.sys)::before {
+    content: ''; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 11px;
+    background: url('/brand/living-core-blue-v1-128.png') center / cover no-repeat;
+  }
+  .page.modern-chat.focus .msg-row:not(.user):not(.sys) .bubble {
+    flex: 1; min-width: 0; max-width: none; padding: .25rem 0 0; border-color: transparent; background: transparent; box-shadow: none;
+  }
+
+  /* How the answer was made: one quiet line until it is opened. */
+  .page.modern-chat.focus .thinking:not(.open) { border-color: transparent; background: transparent; box-shadow: none; }
+  .page.modern-chat.focus .thinking:not(.open) .thinking-head { padding: .3rem 0; color: var(--sl-text-dim); background: transparent; }
+  .page.modern-chat.focus .thinking:not(.open) .thinking-title { color: var(--sl-text-dim); font-weight: 500; }
+  .page.modern-chat.focus .thinking:not(.open) .thinking-meta { color: var(--sl-text-faint); }
+
+  /* Under the latest reply: what the work produced, then what to do next. */
+  .reply-artifacts { display: grid; gap: .5rem; margin: .9rem 0 .35rem; }
+  .page.modern-chat.focus .msg-parts :global(.artifact-card) { margin: .9rem 0 .35rem; }
+  .connect-ask { max-width: 40rem; margin: .9rem 0 .4rem 2.6rem; display: grid; gap: .15rem; }
+  .connect-title { margin: 0; font-weight: 650; color: var(--sl-text); }
+  .connect-text { margin: 0; color: var(--sl-text-dim); line-height: 1.5; }
+  .connect-detail { margin-top: .35rem; display: grid; gap: .1rem; font-size: .85rem; color: var(--sl-text-dim); }
+  .connect-detail p { margin: 0; }
+  .connect-detail span { color: var(--sl-text-faint); margin-right: .35rem; }
+  .connect-actions { display: flex; gap: 1.1rem; margin-top: .35rem; }
+  .connect-actions button { padding: .2rem 0; border: 0; background: transparent; color: var(--sl-text-dim); font-size: .92rem; font-weight: 600; cursor: pointer; }
+  .connect-actions button.go { color: var(--sl-accent); }
+  .connect-actions button:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .reply-next { display: flex; flex-wrap: wrap; gap: .5rem; margin: .7rem 0 .3rem; }
+  .reply-next-chip {
+    padding: .5rem 1rem; border: 0; border-radius: 999px; color: var(--sl-text); background: var(--sl-accent-soft);
+    font-size: .92rem; font-weight: 500; cursor: pointer;
+  }
+  .reply-next-chip:hover { background: var(--sl-accent-soft-strong, var(--sl-accent-soft)); color: var(--sl-accent-ink); }
+
+  /* Composer: the words get the top row to themselves; controls sit beneath. */
+  .page.modern-chat.focus .chat-wrap .input-row {
+    position: relative; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    align-items: center; column-gap: .6rem; row-gap: .4rem;
+    width: 100%; margin: .5rem auto; padding: .9rem 1rem .8rem; border-radius: 22px;
+  }
+  .page.modern-chat.focus .chat-wrap .input-row textarea { grid-column: 1 / -1; grid-row: 1; min-height: 44px; padding: .35rem .4rem; font-size: 1.02rem; }
+  .page.modern-chat.focus .chat-wrap .input-row .attach-btn {
+    grid-column: 1; grid-row: 2; width: 40px; height: 40px; flex: none; border: 1px solid var(--sl-line); border-radius: 50%;
+    color: var(--sl-text); background: transparent; font-size: 1.2rem;
+  }
+  .tools-btn {
+    grid-column: 2; grid-row: 2; justify-self: start; padding: .4rem .6rem .4rem 1rem; border: 0; border-left: 1px solid var(--sl-line); border-radius: 0;
+    color: var(--sl-text); background: transparent; font-size: .95rem; font-weight: 500; cursor: pointer;
+  }
+  .tools-btn:hover:not(:disabled) { color: var(--sl-accent-ink); }
+  .tools-btn:disabled { color: var(--sl-text-faint); cursor: default; }
+  .page.modern-chat.focus .chat-wrap .input-row .composer-voice { grid-column: 4; grid-row: 2; width: 40px; height: 40px; flex: none; display: grid; place-items: center; color: var(--sl-text); background: transparent; }
+  .page.modern-chat.focus .chat-wrap .input-row .composer-voice:hover:not(:disabled) { background: var(--sl-surface-raised); }
+  .page.modern-chat.focus .chat-wrap .input-row .send-btn { grid-column: 5; grid-row: 2; width: 42px; height: 42px; flex: none; font-size: 1.1rem; }
+  .focus-tagline { margin: .15rem 0 .9rem; text-align: center; color: var(--sl-text-faint); font-size: .8rem; }
+  @media (max-width: 768px) {
+    .page.modern-chat.focus .chat-wrap .input-row { padding: .7rem .75rem .6rem; border-radius: 18px; }
+    .page.modern-chat.focus .chat-wrap .input-row textarea { font-size: 16px; }
+    .page.modern-chat.focus .msg-row:not(.user):not(.sys)::before { flex-basis: 30px; width: 30px; height: 30px; border-radius: 9px; }
   }
 </style>

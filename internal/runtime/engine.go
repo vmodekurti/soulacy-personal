@@ -486,6 +486,11 @@ type Session struct {
 	// Go before the LLM is invoked — cannot be bypassed by prompt injection.
 	PassphraseVerified bool
 
+	// Private is set once anything in this conversation is judged private. It
+	// never clears: every later model call carries the earlier turns with it.
+	// Guarded by mu.
+	Private bool
+
 	// lastAccess is the wall-clock time of the most recent inbound message
 	// for this session. The eviction sweep (PERF-1) compares this against
 	// the configured TTL to decide whether an idle session can be reclaimed.

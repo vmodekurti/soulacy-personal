@@ -103,6 +103,13 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 		result = fmt.Sprintf(
 			"NOTE: you already called %s with these arguments this run; do not call it again. "+
 				"Use the result below and proceed to the next step.\n\n%s", tc.Name, prev)
+	} else if recalled, ok := progressGuardFrom(ctx).recallPage(tc); ok {
+		// A page this run has already opened is answered from the last visit
+		// rather than by starting another browser session (#403).
+		result = recalled
+		seenMu.Lock()
+		seen[key] = result
+		seenMu.Unlock()
 	} else {
 		// Per-tool timing + outcome counter. (PRODUCTION_AUDIT →
 		// MED/Observability)
@@ -117,6 +124,7 @@ func (e *Engine) executeOneToolCall(ctx context.Context, def *agent.Definition, 
 		} else {
 			metrics.ToolCallsTotal.WithLabelValues(tc.Name, "success").Inc()
 		}
+		progressGuardFrom(ctx).rememberPage(tc, result, isErr)
 		seenMu.Lock()
 		seen[key] = result
 		seenMu.Unlock()

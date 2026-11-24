@@ -20,6 +20,8 @@ type progressGuard struct {
 	limit, stagnant int
 	recent          [][32]byte
 	err             error
+	// pages remembers managed-browser page opens for this run; see page_revisit.go.
+	pages map[string]*pageVisit
 }
 
 func withProgressGuard(ctx context.Context, def *agent.Definition) context.Context {

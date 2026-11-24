@@ -41,6 +41,13 @@ function localWritable(key, initial) {
 
 export const navLevel = localWritable('soulacy_nav_level', 'simple')
 
+/**
+ * Which shell to draw. 'focus' is the chat-first shell: one conversation, with
+ * every other screen summoned beside it. 'workspace' is the sidebar-and-pages
+ * shell. A preference about the person, so it is remembered like navLevel.
+ */
+export const shellMode = localWritable('soulacy_shell_mode', 'focus')
+
 export const apiKey   = sessionWritable('soulacy_api_key', '')
 export const connected = writable(false)  // WebSocket event stream status
 

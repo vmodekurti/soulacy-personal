@@ -397,6 +397,8 @@ func (a *App) wireLLMRouter() *llm.Router {
 		AllowedProviders: cfg.LLM.AllowedProviders, AllowedModels: cfg.LLM.AllowedModels,
 		AllowedRegions: cfg.LLM.AllowedRegions, ProviderRegions: providerRegions,
 	})
+	llmRouter.SetPrivacyPolicy(llm.PrivacyPolicy{Enabled: cfg.LLM.Privacy.Enabled,
+		Provider: cfg.LLM.Privacy.Provider, Model: cfg.LLM.Privacy.Model})
 	log.Info("llm providers registered",
 		zap.Strings("ids", llmRouter.ProviderIDs()),
 		zap.String("default", llmRouter.DefaultProvider()),

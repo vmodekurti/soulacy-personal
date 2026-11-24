@@ -141,3 +141,24 @@ func TestGenieFastChatOnlySelectsClearlyConversationalTurns(t *testing.T) {
 		t.Fatal("fast chat must be limited to Genie")
 	}
 }
+
+// Connecting a website is the person's own decision. Planning stays free so
+// Genie can propose, but creating must stop for a tap — including on a saved
+// Genie definition that predates this rule.
+func TestGenieConnectorCreationRequiresApproval(t *testing.T) {
+	genie := builtinGenieAgent()
+	if !containsExactString(genie.ConfirmTools, "create_connector") {
+		t.Fatal("create_connector is not in Genie's confirmation gate")
+	}
+	for _, tool := range []string{"plan_connector", "list_connectors"} {
+		if containsExactString(genie.ConfirmTools, tool) {
+			t.Fatalf("read-only connector tool %q should not require approval", tool)
+		}
+	}
+	saved := builtinGenieAgent()
+	saved.ConfirmTools = []string{"portal_confirm"}
+	hardenGenieDefinition(saved)
+	if !containsExactString(saved.ConfirmTools, "create_connector") {
+		t.Fatal("a saved Genie definition lost the connector confirmation gate")
+	}
+}

@@ -197,6 +197,9 @@ func (e *Engine) handle(ctx context.Context, msg message.Message) (reply message
 	ctx = WithActiveAgent(ctx, def.ID)
 	ctx = applyAgentPrincipalBoundary(ctx, def)
 	applyPlaygroundOverrides(def, msg.Metadata)
+	// Private conversations are answered by the local model (privacy_route.go).
+	ctx, markLocal := e.routePrivateRun(ctx, def, msg, &metadata)
+	defer func() { markLocal(&reply, err) }()
 	runProvider = strings.TrimSpace(def.LLM.Provider)
 	runModel = strings.TrimSpace(def.LLM.Model)
 	runStrategy = strings.TrimSpace(def.Reasoning.Strategy)

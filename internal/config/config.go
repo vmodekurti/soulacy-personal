@@ -864,6 +864,9 @@ type LLMConfig struct {
 	AllowedModels    []string                  `mapstructure:"allowed_models"`
 	AllowedRegions   []string                  `mapstructure:"allowed_regions"`
 	Routing          LLMRoutingConfig          `mapstructure:"routing"`
+	// Privacy keeps private conversations on a provider that runs on this
+	// machine. On by default; it does nothing until a local provider exists.
+	Privacy LLMPrivacyConfig `mapstructure:"privacy"`
 
 	// Studio optionally overrides which provider/model the Studio visual
 	// builder uses for its COMPILE reasoning (turning a plain-language intent
@@ -895,6 +898,14 @@ type LLMConfig struct {
 // Routes are ordered candidate chains keyed by simple, standard, or complex.
 // The feature is disabled by default so existing fixed assignments remain
 // unchanged until an operator opts in from the normal Settings experience.
+// LLMPrivacyConfig controls private-data routing. Provider and Model optionally
+// pin the local route; empty picks the first local provider and its default model.
+type LLMPrivacyConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Provider string `mapstructure:"provider"`
+	Model    string `mapstructure:"model"`
+}
+
 type LLMRoutingConfig struct {
 	Enabled          bool                           `mapstructure:"enabled"`
 	DefaultMode      string                         `mapstructure:"default_mode"`
@@ -1273,6 +1284,7 @@ func Load(cfgPath string) (*Config, string, error) {
 	v.SetDefault("costs.reconciliation.interval", "24h")
 	v.SetDefault("costs.reconciliation.variance_alert_threshold", 0.1)
 	v.SetDefault("knowledge.embedding_provider", "ollama")
+	v.SetDefault("llm.privacy.enabled", true)
 	v.SetDefault("knowledge.embedding_model", "nomic-embed-text")
 	v.SetDefault("knowledge.chunk_size", 1000)
 	v.SetDefault("knowledge.chunk_overlap", 200)

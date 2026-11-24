@@ -117,7 +117,7 @@ func builtinGenieAgent() *agent.Definition {
 		Enabled: true, StreamReply: true,
 		// Execution limits inherit the workspace policy unless explicitly configured.
 		Skills: []string{"*"}, Agents: []string{"*"}, ParallelPeerCalls: true, StructuredPeerResults: true,
-		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"portal_confirm", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"},
+		Builtins: &builtins, MCPServers: &mcpServers, ConfirmTools: []string{"portal_confirm", "create_connector", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"},
 		LLM:    agent.LLMConfig{Temperature: 0.2, MaxTokens: agent.DefaultMaxOutputTokens, ReasoningEffort: "high"},
 		Memory: agent.MemoryPolicy{ReadScopes: []string{"session"}, WriteScopes: []string{"session"}, MaxTokens: 4000},
 		Policy: agent.ToolPolicyConfig{Enabled: true, Shell: "deny", File: "deny", Network: "allow"},
@@ -131,7 +131,7 @@ You are the way into Soulacy, so know what it is. Soulacy is a self-hosted perso
 
 When someone asks for something to be set up, automated, or run without them, build it with build_agent. That is Soulacy's agent builder — the same one behind Studio — so it knows what is installed, asks for anything it still needs, and saves a real agent. If it comes back with a question, ask the user that question in your own words and call build_agent again with the same session and their answer. Use create_monitor only for the narrow job it fits: check a condition on a schedule and report a sentence, needing no tools and no delivery beyond the report. Never send someone to Studio for something you can build here — Studio is where they go to change what already exists, or to approve an agent that would be reachable on a channel.
 
-When someone wants to connect a group of websites around a goal, use plan_connector to propose the sites and explain which capabilities are public. Let the user change the site list, then use create_connector. Public access is the default and never needs a provider credential. Offer Website Access only when the user wants account-only, subscribed, personalized, or saved content. Never ask for passwords, cookies, browser storage, or API keys in chat.
+When someone wants to connect a group of websites around a goal, use plan_connector to propose the sites and explain which capabilities are public. Let the user change the site list, then use create_connector. Calling it shows the person a Connect prompt with the sites; they decide there, so do not also ask them to type a confirmation, and never say something is connected until the tool result says so. Public access is the default and never needs a provider credential. Offer Website Access only when the user wants account-only, subscribed, personalized, or saved content. Never ask for passwords, cookies, browser storage, or API keys in chat.
 
 When someone gives you an ongoing responsibility, use plan_mission. Agree on a concrete finish line, a schedule, and optional delivery before calling create_mission. A mission is the user's visible standing contract with you: keep its progress, blocker, and next action current with update_mission. Use a plain monitor only for a narrow condition check that does not need ongoing progress. Never interpret an active mission as permission to bypass an approval. Stay quiet between runs unless there is meaningful progress, a blocker, completion, failure, or required user action.
 
@@ -166,7 +166,9 @@ func hardenGenieDefinition(def *agent.Definition) {
 	def.Builtins = base.Builtins
 	def.MCPServers = base.MCPServers
 	def.Policy = base.Policy
-	for _, required := range []string{"portal_confirm", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"} {
+	// create_connector is here so that connecting something is always the
+	// person's own tap, never a conclusion Genie reached from the conversation.
+	for _, required := range []string{"portal_confirm", "create_connector", "commit_website_action", "cancel_monitor", "cancel_mission", "channel.send"} {
 		if !containsExactString(def.ConfirmTools, required) {
 			def.ConfirmTools = append(def.ConfirmTools, required)
 		}

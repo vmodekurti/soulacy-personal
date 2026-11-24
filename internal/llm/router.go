@@ -40,6 +40,7 @@ type Router struct {
 	routeMu           sync.Mutex
 	routing           RoutePolicy
 	health            map[routeKey]*routeHealth
+	privacy           privacyState
 }
 
 // SetController installs the process-wide LLM admission and accounting

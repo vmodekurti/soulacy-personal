@@ -6,7 +6,37 @@ to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Chat-first home. Soulacy now opens on one conversation, with every other
+  screen opened beside it from a single menu. The home screen shows a greeting
+  and one sentence; when something is waiting for you it shows a single line
+  with **Approve** and **Decline**. The full workspace with its sidebar is one
+  switch away, and the choice is remembered.
+- Connect a website by asking. When Genie proposes a website connector, the
+  chat shows one **Connect** line naming the sites instead of a dialog. Genie
+  can no longer create a connector without that approval.
+- Private conversations stay on your machine. When your own message contains
+  something sensitive (a card or government ID number, bank details, a
+  password or code, a private key, a health, money or legal matter about you,
+  or "keep this private"), the whole run is answered by your local model and
+  the reply is labelled "Answered privately, on your own machine". If the
+  local model cannot answer, nothing is sent elsewhere. On by default when a
+  local model is configured; set `llm.privacy.enabled: false` to turn it off,
+  or `llm.privacy.provider` / `llm.privacy.model` to choose the model. Only
+  your own words are judged: web pages, files and tool results are not.
+
 ### Fixed
+- The chat page no longer freezes during a long run. It was rewriting every
+  saved conversation to browser storage on each streamed word; it now saves at
+  most every 1.5 seconds, keeps a bounded activity trail per answer, and
+  applies streamed words in small batches (#402).
+- Genie no longer reopens the same web page over and over. In a long research
+  run older page snapshots are shortened to fit the model, so Genie forgot
+  what it had read; one shopping question opened three pages about twenty
+  times each. A page is now opened at most twice per request, and later
+  requests are answered from the text of the last visit (#403).
+- Tables in chat replies keep short words, numbers and prices whole instead of
+  splitting them across lines when another column is long (#404).
 - The managed-deployment upgrade prompt now shows the current-to-target version
   transition and can verify a redeploy in place. **I've redeployed — check
   again** refreshes the signed release status and clearly reports when the old
