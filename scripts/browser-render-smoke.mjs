@@ -77,7 +77,7 @@ llm:
   default_provider: ollama
   providers:
     ollama:
-      base_url: "http://localhost:11434"
+      base_url: "${process.env.SOULACY_BROWSER_RENDER_OLLAMA_URL || 'http://localhost:11434'}"
       model: "llama3.2"
 agent_dirs:
   - "${workspace}/agents"
@@ -111,9 +111,20 @@ try {
     window.localStorage.setItem('soulacy_api_key', key)
     window.localStorage.setItem('soulacy-onboarding-seen', '1')
   }, apiKey)
+  // The smoke proves the GUI renders; it does not need a model server. CI has
+  // no Ollama, so the gateway answers 502 for the provider's model list (#407).
+  const providerUnreachable = (status, url) => {
+    try {
+      return status === 502 && /^\/api\/v1\/providers\/[^/]+\/models$/.test(new URL(url).pathname)
+    } catch {
+      return false
+    }
+  }
   const consoleErrors = []
   page.on('console', msg => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text())
+    if (msg.type() !== 'error') return
+    if (/status of 502/.test(msg.text()) && providerUnreachable(502, msg.location()?.url || '')) return
+    consoleErrors.push(msg.text())
   })
   page.on('pageerror', err => {
     consoleErrors.push(err.message)
@@ -125,7 +136,8 @@ try {
     const expectedEmptyMetrics = status === 404 &&
       response.request().method() === 'GET' &&
       /^\/api\/v1\/runs\/[^/]+\/metrics$/.test(pathname)
-    if (status >= 400 && !/\/favicon(?:\.|$)/i.test(pathname) && !expectedEmptyMetrics) {
+    if (status >= 400 && !/\/favicon(?:\.|$)/i.test(pathname) && !expectedEmptyMetrics &&
+      !(response.request().method() === 'GET' && providerUnreachable(status, response.url()))) {
       networkErrors.push(`HTTP ${status} ${response.request().method()} ${response.url()}`)
     }
   })
@@ -162,7 +174,7 @@ try {
     // A loading shell is not evidence that the destination works.
     await page.waitForTimeout(800)
     if (name === 'config') await page.locator('#default-provider').waitFor({ state: 'visible', timeout: 30000 })
-    if (name === 'chat') await page.locator('.empty-title, .msg-row').first().waitFor({ state: 'visible', timeout: 15000 })
+    if (name === 'chat') await page.locator('.focus-brief, .empty-title, .msg-row').first().waitFor({ state: 'visible', timeout: 15000 })
     const screenshotPath = join(outDir, `${name}.png`)
     await page.screenshot({ path: screenshotPath, fullPage: true })
     const text = await page.locator('body').innerText({ timeout: 10000 })
