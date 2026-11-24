@@ -167,3 +167,26 @@ func TestLearningNotebookAuthScopesAndObjectDeny(t *testing.T) {
 	undoRequest(t, s, "GET", notebookAPI+"/lessons", owner, "", 403)
 	undoRequest(t, s, "POST", notebookAPI+"/teach", owner, `{"note":"Use metric units for measurements."}`, 403)
 }
+
+func TestLearningNotebookReportsLessonEffects(t *testing.T) {
+	s, n := notebookGateway(t, "secret")
+	scope := learning.Scope{Owner: "admin", AgentID: "learner"}
+	d := learning.Draft{Key: "units", Kind: "preference", Title: "Measurement units", Trigger: "Writing measurements", Content: "Use metric units.", Verification: "Check the request for exceptions.", Citations: []learning.Citation{{SourceID: "user", Quote: "Use metric units for measurements."}}}
+	l, _, err := n.Propose(context.Background(), scope, "effect", "session", d, []learning.Source{{ID: "user", Kind: "user", Text: d.Citations[0].Quote}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoRequest(t, s, "GET", notebookAPI+"/lessons/"+l.ID+"/effect", "secret", "", 409)
+	if _, err = n.Review(context.Background(), scope, l.ID, "approve"); err != nil {
+		t.Fatal(err)
+	}
+	one := undoRequest(t, s, "GET", notebookAPI+"/lessons/"+l.ID+"/effect", "secret", "", 200)
+	if one["lesson_id"] != l.ID || one["verdict"] != "too_early" {
+		t.Fatal(one)
+	}
+	all := undoRequest(t, s, "GET", notebookAPI+"/effectiveness", "secret", "", 200)
+	if effects, _ := all["effects"].([]any); len(effects) != 1 {
+		t.Fatal(all)
+	}
+	undoRequest(t, s, "GET", "/api/v1/agents/learner/learning/effectiveness?api_key=secret", "", "", 403)
+}

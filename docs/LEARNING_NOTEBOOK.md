@@ -112,6 +112,37 @@ ranking. It can miss paraphrases. Feedback is your single current vote per
 revision, not a model-generated score. A load count measures retrieval, not
 improvement. There is no automatic promotion based on ratings or usage.
 
+## Is a lesson helping?
+
+Opening an active lesson on web shows **Effect on results**. It compares the
+recorded runs that loaded the lesson with similar runs that did not. A run has
+a problem when it failed or one of its tool calls returned an error. Tool
+counts skip the tools learning never observes (learning, Safe Undo, session
+search and delegated agents). Episodes recorded before this feature report no
+tool counts.
+
+"Similar" means the request shares at least two words with the lesson's title
+and trigger (one, if the lesson has only one usable word). Preferences apply
+to every request and are loaded into every run once approved, so their
+baseline is all runs that did not load them, mostly runs from before approval.
+
+| Verdict | Rule |
+| --- | --- |
+| Too early to tell | Fewer than 5 runs with it, or fewer than 5 similar runs without it. |
+| Not being used | Approved at least 14 days ago and loaded in none of the recorded runs. Consider disabling it or rewording when to use it. |
+| More problems with it | Its problem rate is at least 20 points higher than the baseline. Review or disable it. |
+| Fewer problems with it | Its problem rate is at least 20 points lower. |
+| No clear difference | Anything in between. |
+
+This makes no model calls: it reads the episodes (latest 500) and usage
+receipts the notebook already keeps. It is observational. Runs differ in
+more than one lesson, so a verdict is a reason to review, never an automatic
+disable or approval. The idea of judging a change by contrasting runs with and
+without it comes from
+[Harness²](https://github.com/google-research/harness2), which re-runs each
+task per candidate; Soulacy uses the contrasts that ordinary use already
+produces instead, so it adds no cost.
+
 With notebook storage wired, `session_search` uses the same private episode
 scope and refuses cross-agent searches. It requires an authenticated,
 learning-enabled run; it no longer falls back to agent-wide action-log history.
@@ -129,6 +160,8 @@ Base: `/api/v1/agents/:id/learning`. All responses are `Cache-Control: no-store`
 | `POST /lessons/:lesson/review` | `{"action":"approve\|reject\|archive\|restore","confirmed":true}`. |
 | `POST /lessons/:lesson/feedback` | `{"rating":1}` or `{"rating":-1}`. |
 | `GET /lessons/:lesson/export` | Download an active skill as a portable `SKILL.md` document. This does not install it. |
+| `GET /lessons/:lesson/effect` | Recorded-run comparison for one active lesson; 409 for any other status. |
+| `GET /effectiveness` | `{"effects":[...]}` for every active lesson, those most worth reviewing first. |
 
 Mutations are not automatically retried by web/iOS after transport failure.
 Refresh before retrying an uncertain result. HTTP 400 means invalid input, 404

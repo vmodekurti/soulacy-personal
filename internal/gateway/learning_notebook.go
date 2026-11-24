@@ -23,6 +23,8 @@ func (s *Server) registerLearningNotebookRoutes(api fiber.Router) {
 	api.Post("/lessons/:lesson/review", write, s.handleLearningNotebook)
 	api.Post("/lessons/:lesson/feedback", write, s.handleLearningNotebook)
 	api.Get("/lessons/:lesson/export", read, s.handleLearningNotebook)
+	api.Get("/lessons/:lesson/effect", read, s.handleLearningNotebook)
+	api.Get("/effectiveness", read, s.handleLearningNotebook)
 }
 
 func (s *Server) handleLearningNotebook(c *fiber.Ctx) error {
@@ -61,6 +63,12 @@ func (s *Server) handleLearningNotebook(c *fiber.Ctx) error {
 	var err error
 	id := strings.Clone(c.Params("lesson"))
 	switch {
+	case c.Method() == "GET" && strings.HasSuffix(c.Path(), "/effectiveness"):
+		var effects []learning.Effect
+		effects, err = n.Effects(ctx, scope)
+		result = fiber.Map{"effects": effects}
+	case c.Method() == "GET" && strings.HasSuffix(c.Path(), "/effect"):
+		result, err = n.Effect(ctx, scope, id)
 	case c.Method() == "GET" && id == "":
 		status := c.Query("status", "active")
 		if status != "" && status != "active" && status != "pending" && status != "archived" && status != "superseded" && status != "rejected" {

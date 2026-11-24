@@ -199,3 +199,18 @@ func TestTeachLearningRefusesUntrustedScopesAndDisabledAuthentication(t *testing
 		t.Fatal("unauthorized model spending")
 	}
 }
+
+func TestLearningEpisodeCountsObservedToolOutcomes(t *testing.T) {
+	e, _, def, n, ctx := learningEngine(t)
+	msg := testUserMessage(def.ID, "s", "Please convert the metric recipe.")
+	ctx = llm.WithCallMetadata(ctx, llm.CallMetadata{RunID: "counted"})
+	ctx = e.startLearningRun(ctx, def.Clone(), msg)
+	e.observeLearningTool(ctx, def, message.ToolCall{Name: "fetch_url"}, "ok", nil)
+	e.observeLearningTool(ctx, def, message.ToolCall{Name: "fetch_url"}, "", errors.New("timeout"))
+	e.observeLearningTool(ctx, def, message.ToolCall{Name: "learning.search"}, "", errors.New("not counted"))
+	e.finishLearningRun(ctx, msg, testUserMessage(def.ID, "s", "Done."), true)
+	eps, err := n.Recall(ctx, learning.Scope{Owner: "alice", AgentID: def.ID}, "metric recipe", "")
+	if err != nil || len(eps) != 1 || eps[0].ToolCalls != 2 || eps[0].ToolFailures != 1 || !eps[0].Success {
+		t.Fatalf("%+v %v", eps, err)
+	}
+}

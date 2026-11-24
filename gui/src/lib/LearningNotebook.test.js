@@ -4,7 +4,7 @@ import { mount, unmount } from 'svelte'
 import LearningNotebook from './LearningNotebook.svelte'
 import { apiFetch } from './api.js'
 import { apiKey } from './stores.js'
-import { validateLesson, validateLessons } from './learningNotebook.js'
+import { validateLesson, validateLessons, validateEffect } from './learningNotebook.js'
 vi.mock('./api.js', () => ({ apiFetch: vi.fn() }))
 const lesson = (status = 'pending') => ({ id: 'one', agent_id: 'agent', key: 'release-checks', kind: 'skill', title: 'Release checklist', trigger: 'Preparing a release', content: '<script>bad()</script> Check the staging migration.', verification: 'Run smoke tests.', pitfalls: 'Stop on a mismatch.', status, version: 1, uses: 0, helpful: 0, unhelpful: 0, citations: [{ source_id: 'user', quote: 'Always check staging first.' }], sources: [{ id: 'user', kind: 'user', text: 'Always check staging first.' }] })
 const page = () => ({ lessons: [lesson()], enabled: true, auto_propose: true, total: 1, offset: 0 })
@@ -90,5 +90,23 @@ describe('Learning notebook', () => {
     button('Create learning draft').click(); await wait()
     expect(target.textContent).toContain('No reusable lesson was found')
     expect(button('Approve lesson')).toBeUndefined()
+  })
+  it('shows a recorded-run comparison for an active lesson and drops malformed ones', async () => {
+    const effect = { lesson_id: 'one', verdict: 'worse', reason: 'Runs that loaded it had problems 67% of the time.', with: { runs: 6, problems: 4 }, without: { runs: 6, problems: 0 } }
+    expect(validateEffect({ ...effect, with: { runs: 1, problems: 2 } }, 'one')).toBeNull()
+    expect(validateEffect({ ...effect, verdict: 'disable-now' }, 'one')).toBeNull()
+    expect(validateEffect(effect, 'other')).toBeNull()
+    apiFetch.mockResolvedValueOnce({ ...page(), lessons: [lesson('active')] }).mockResolvedValueOnce(lesson('active')).mockResolvedValueOnce(effect)
+    await render(); button('Release checklist').click(); await wait(); await wait()
+    expect(apiFetch.mock.calls[2][0]).toBe('/agents/agent/learning/lessons/one/effect')
+    expect(target.textContent).toContain('More problems with it')
+    expect(target.textContent).toContain('4 of 6 runs had a problem')
+  })
+  it('keeps an active lesson reviewable when its comparison is unavailable', async () => {
+    apiFetch.mockResolvedValueOnce({ ...page(), lessons: [lesson('active')] }).mockResolvedValueOnce(lesson('active')).mockRejectedValueOnce(new Error('offline'))
+    await render(); button('Release checklist').click(); await wait(); await wait()
+    expect(target.textContent).not.toContain('Effect on results')
+    expect(button('Disable lesson')).toBeDefined()
+    expect(target.querySelector('[role=alert]')).toBeNull()
   })
 })
