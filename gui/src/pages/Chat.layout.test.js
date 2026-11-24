@@ -49,12 +49,18 @@ describe('focused Chat workspace', () => {
     expect(chat).toContain('const thinking = { open: false, events: [] }')
     expect(chat).toContain('const nextThinking = { open: t.thinking?.open ?? false, events: merged.slice(-80) }')
     expect(chat).toContain('How this answer was made')
+    // A reply the gateway kept on the local model says so in the same line.
+    expect(chat).toContain("msg.metadata?.answered_locally === 'true' ? 'Answered privately, on your own machine'")
     expect(chat).toContain('An auditable summary of decisions, tools, and evidence.')
     expect(chat).not.toContain('const thinking = { open: true, events: [] }')
   })
 
   it('keeps active chat runs and every turn trace across page navigation', () => {
-    expect(chat).toContain('thinking: m.thinking ? { ...m.thinking, open: false } : null')
+    // Each turn's trace is still saved with its message, closed and bounded (#402).
+    expect(chat).toContain('thinking: slimThinking(m.thinking),')
+    // Saving is throttled so a long run cannot freeze the tab.
+    expect(chat).toContain('const persistSoon = throttleTrailing(persistThreads, 1500)')
+    expect(chat).toContain("window.addEventListener('pagehide', savePending)")
     expect(chat).toContain('if (Object.keys($chatThreads).length === 0) restoreThreads()')
     expect(chat).toContain('const live = Object.values($chatThreads).find(t => t.activeRunKey === key)')
     expect(chat).toContain("return live?.id || ''")

@@ -1,8 +1,8 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { derived } from 'svelte/store'
   import BrandMark from './lib/BrandMark.svelte'
-  import { apiKey, connected, authRequired, navLevel } from './lib/stores.js'
+  import { apiKey, connected, authRequired, navLevel, shellMode } from './lib/stores.js'
   import ShareView from './pages/ShareView.svelte'
   import PersonalLanding from './pages/PersonalLanding.svelte'
   import { pageTitle } from './lib/pagetitle.js'
@@ -18,8 +18,11 @@
   import BuildChangeNotice from './lib/BuildChangeNotice.svelte'
   import { startBuildWatch } from './lib/buildwatch.js'
   import {
-    loadWalkthroughState, startWalkthrough, shouldAutoStart,
+    loadWalkthroughState, startWalkthrough, shouldAutoStart, walkthrough,
   } from './lib/walkthrough/store.js'
+  import { get } from 'svelte/store'
+  import FocusBrief from './lib/FocusBrief.svelte'
+  import { HOME_PAGE, isHomePage, panelLayout, shellModes, loadBrief } from './lib/focusshell.js'
 
   let page = 'feed'
   let shareToken = ''   // set from #share/<token> — renders the public read-only view
@@ -40,6 +43,69 @@
   let pageLoadError = ''
   let pageLoadStale = false
   let pageLoadSeq = 0
+
+  // ── Chat-first shell ─────────────────────────────────────────────────────
+  // The conversation is the home screen and stays mounted; `page` then names
+  // the screen summoned beside it rather than the screen replacing it. Routing
+  // is untouched — #schedule still means Automations — so every deep link and
+  // every in-page `navigate` keeps working in both shells.
+  //
+  // The orientation tour points at sidebar entries, so while it runs the full
+  // workspace is drawn regardless of the preference.
+  $: focus = $shellMode === 'focus' && !$walkthrough.active
+  $: panelMode = focus ? panelLayout(page) : ''
+  let ChatComponent = null
+  $: if (focus && sessionChecked && !$authRequired && !ChatComponent) {
+    pageLoaders.chat().then((mod) => { ChatComponent = mod.default }).catch(() => {})
+  }
+  let brief = null
+  let briefTimer = null
+  async function refreshBrief() {
+    try { brief = await loadBrief(api) } catch (_) { /* keep the last good brief */ }
+  }
+  // Answering the one waiting thing from the brief. The line only leaves once
+  // the gateway has accepted the answer; a failure stays put and says so.
+  let briefBusy = false
+  let briefError = ''
+  async function decideWaiting({ callId, ok }) {
+    if (briefBusy || !callId) return
+    briefBusy = true
+    briefError = ''
+    try {
+      await (ok ? api.approvals.approve(callId) : api.approvals.deny(callId))
+      await refreshBrief()
+    } catch (e) {
+      briefError = `That didn't go through. ${e?.message || 'Try again.'}`
+    } finally {
+      briefBusy = false
+    }
+  }
+  $: if (focus && sessionChecked && !$authRequired && !briefTimer && typeof window !== 'undefined') {
+    refreshBrief()
+    briefTimer = setInterval(refreshBrief, 60000)
+  }
+  $: if (!focus && briefTimer) { clearInterval(briefTimer); briefTimer = null }
+  onDestroy(() => { if (briefTimer) clearInterval(briefTimer) })
+  // The chat page's own header is hidden in this shell; these reach the
+  // controls it held.
+  let chatRef = null
+  function startNewChat() {
+    if (!isHomePage(page)) navigate(HOME_PAGE)
+    chatRef?.newChat?.()
+  }
+  function chatMenu(action) {
+    appLauncherOpen = false
+    if (!isHomePage(page) && panelLayout(page) === 'solo') navigate(HOME_PAGE)
+    chatRef?.[action]?.()
+  }
+  const homePage = () => (get(shellMode) === 'focus' ? HOME_PAGE : 'feed')
+  function setShellMode(key) {
+    shellMode.set(key)
+    appLauncherOpen = false
+    // Feed is the workspace's home and the conversation is this shell's; do not
+    // strand someone on the other shell's front door.
+    if (key === 'focus' && page === 'feed') navigate(HOME_PAGE)
+  }
 
   // Soulacy opens in the bright workspace. People can still opt into the dark
   // theme, and that explicit choice is remembered per browser.
@@ -87,7 +153,9 @@
   }
   const railIcon = (id, fallback) => railPresentation[id]?.[0] || fallback
   const railLabel = (id, fallback) => railPresentation[id]?.[1] || fallback
-  $: launcherPages = pages.filter((p) => {
+  // In the chat-first shell the launcher is the only map there is, so it shows
+  // every screen; menu levels only thin out a sidebar that is not on screen.
+  $: launcherPages = (focus ? navPages : pages).filter((p) => {
     const q = appSearch.trim().toLowerCase()
     return !q || p.label.toLowerCase().includes(q) || p.group.toLowerCase().includes(q)
   })
@@ -145,7 +213,7 @@
 
   // Keep the browser tab title in sync with the active page (Story 15).
   $: if (typeof document !== 'undefined' && !$authRequired) document.title = pageTitle(page, pages, pluginPages)
-  $: if (!shareToken && sessionChecked && !$authRequired && page !== loadedPage) loadPageComponent(page)
+  $: if (!shareToken && sessionChecked && !$authRequired && page !== loadedPage && !(focus && isHomePage(page))) loadPageComponent(page)
 
   function navigate(p) {
     p = retiredPages[p] || p
@@ -246,6 +314,8 @@
           return
         }
         if (seg && navPages.find(p => p.id === seg)) page = seg
+        // No route at all: open on this shell's front door.
+        else if (page === 'feed') page = homePage()
         return
       }
       // A hash that names no screen we have. Falling through here used to
@@ -259,9 +329,9 @@
       //
       // replaceState, not pushState: the broken URL should not become a place
       // the back button can return to.
-      page = 'feed'
+      page = homePage()
       sidebarOpen = false
-      history.replaceState({}, '', '#dashboard')
+      history.replaceState({}, '', '#' + (isHomePage(page) ? HOME_PAGE : 'dashboard'))
     }
     applyHash()
     window.addEventListener('popstate', applyHash)
@@ -278,7 +348,7 @@
     let onboardingDecided = Promise.resolve()
     try {
       const seen = localStorage.getItem('soulacy-onboarding-seen') === '1'
-      if (!seen && !location.hash && (page === 'feed' || page === 'dashboard')) {
+      if (!seen && !location.hash && (page === 'feed' || page === 'dashboard' || isHomePage(page))) {
         onboardingDecided = api.onboarding.status()
           .then((st) => {
             const provider = (st?.steps || []).find(s => s.key === 'provider')
@@ -478,7 +548,30 @@
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (sidebarOpen = false)} />
 
 {#if !shareToken && sessionChecked && !$authRequired}
-<div class="layout" class:chat-route={page === 'chat'}>
+<div class="layout" class:chat-route={page === 'chat'} class:focus-shell={focus}>
+  {#if focus}
+  <!-- Chat-first shell: the only standing chrome is this bar. Three counts
+       stand in for the feed, the run log and the reports; everything else is
+       summoned from the conversation. -->
+  <header class="focus-top">
+    <button class="focus-menu" on:click={openLauncher} aria-label="Open the menu: every screen, history and settings" aria-expanded={appLauncherOpen}>
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <button class="focus-home" on:click={() => navigate(HOME_PAGE)} aria-label="Back to the conversation">
+      <BrandMark size={30} />
+      <span>soulacy</span>
+    </button>
+    <div class="focus-actions">
+      {#if !$connected}
+        <span class="focus-offline" role="status">Reconnecting…</span>
+      {/if}
+      <button class="focus-round" on:click={startNewChat} title="New conversation" aria-label="Start a new conversation">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-11 6.6L4.5 19.5l1.4-4.3A7.5 7.5 0 1 1 20 11.5Z"/><path d="M12.5 8.8v5.4M9.8 11.5h5.4"/></svg>
+      </button>
+      <button class="topbar-avatar focus-avatar" on:click={openKeyModal} title="Account and browser login" aria-label="Account and browser login">V</button>
+    </div>
+  </header>
+  {:else}
   <header class="desktop-topbar">
     <button class="topbar-brand" on:click={() => navigate('feed')} aria-label="Open Soulacy feed">
       <span class="topbar-mark"><BrandMark size={28} /></span>
@@ -611,18 +704,36 @@
       <button class="icon-btn" on:click={openKeyModal} title="Change browser login">🔑</button>
     </div>
   </aside>
+  {/if}
 
   {#if appLauncherOpen}
     <button class="launcher-backdrop" on:click={() => appLauncherOpen = false} aria-label="Close all tools"></button>
-    <div class="app-launcher" role="dialog" aria-modal="true" aria-label="All Soulacy tools">
+    <div class="app-launcher" class:centered={focus} role="dialog" aria-modal="true" aria-label="All Soulacy tools">
       <header>
         <div><strong>All tools</strong><span>Jump anywhere in Soulacy</span></div>
         <button on:click={() => appLauncherOpen = false} aria-label="Close all tools">×</button>
       </header>
       <label class="launcher-search"><span>⌕</span><input bind:value={appSearch} placeholder="Find a screen" /></label>
+      {#if focus}
+      <div class="launcher-quick" role="group" aria-label="Conversation and appearance">
+        <button on:click={() => chatMenu('showHistory')}>Conversation history</button>
+        <button on:click={() => chatMenu('showDetails')}>Agent and details</button>
+        <button on:click={toggleTheme}>{theme === 'light' ? 'Night theme' : 'Day theme'}</button>
+        <span class="launcher-build"><BuildBadge compact /></span>
+      </div>
+      {/if}
+      {#if !focus}
       <div class="launcher-modes" role="group" aria-label="Pages shown in the menu">
         {#each navLevels as lvl}
           <button class:on={$navLevel === lvl.key} aria-pressed={$navLevel === lvl.key} on:click={() => navLevel.set(lvl.key)}>{lvl.label}</button>
+        {/each}
+      </div>
+      {/if}
+      <div class="launcher-modes launcher-shell" role="group" aria-label="Layout">
+        <span>Layout</span>
+        {#each shellModes as m}
+          <button class:on={$shellMode === m.key} aria-pressed={$shellMode === m.key} title={m.hint}
+                  on:click={() => setShellMode(m.key)}>{m.label}</button>
         {/each}
       </div>
       <div class="launcher-grid">
@@ -648,6 +759,54 @@
     <Walkthrough on:navigate={(e) => navigate(e.detail)} />
   {/if}
 
+  {#if focus}
+  <!-- The conversation never unmounts. A summoned screen opens beside it, so
+       asking about what is on the panel does not cost you the panel. -->
+  <main class="focus-stage" class:has-panel={!!panelMode} class:wide={panelMode === 'wide'} class:solo={panelMode === 'solo'}>
+    <section class="content focus-chat" aria-label="Conversation">
+      <BuildChangeNotice />
+      {#if ChatComponent}
+        <svelte:component this={ChatComponent} bind:this={chatRef} focusShell>
+          <FocusBrief slot="hero" {brief} busy={briefBusy} error={briefError}
+                      on:open={(e) => navigate(e.detail)} on:decide={(e) => decideWaiting(e.detail)} />
+        </svelte:component>
+      {:else}
+        <div class="page-loading">Opening your conversation…</div>
+      {/if}
+    </section>
+    {#if panelMode}
+      <aside class="focus-panel" aria-label={currentPageLabel}>
+        <header class="focus-panel-head">
+          <strong>{currentPageLabel}</strong>
+          <button on:click={() => navigate(HOME_PAGE)} aria-label="Close {currentPageLabel} and return to the conversation" title="Close">×</button>
+        </header>
+        <div class="content focus-panel-body">
+          {#if pageLoadError}
+            <div class="page-loading err">
+              <strong>{pageLoadStale ? 'Soulacy updated while this tab was open.' : 'Could not load this page.'}</strong>
+              <span>{pageLoadError}</span>
+              {#if pageLoadStale}
+                <button class="btn-primary" on:click={() => recoverFromStaleAssets({ force: true })}>Reload fresh UI</button>
+              {/if}
+            </div>
+          {:else if PageComponent && isPluginPage(page)}
+            {@const mount = pluginPages.find(p => p.id === page)}
+            <svelte:component
+              this={PageComponent}
+              pluginId={pluginIdFromPage(page)}
+              label={mount?.label || pluginIdFromPage(page)}
+              url={mount?.url || ''}
+            />
+          {:else if PageComponent}
+            <svelte:component this={PageComponent} />
+          {:else}
+            <div class="page-loading">Loading {pageTitle(page, pages, pluginPages)}…</div>
+          {/if}
+        </div>
+      </aside>
+    {/if}
+  </main>
+  {:else}
   <!-- Main content -->
   <main class="content">
     <BuildChangeNotice />
@@ -673,14 +832,16 @@
       <div class="page-loading">Loading {pageTitle(page, pages, pluginPages)}…</div>
     {/if}
   </main>
+  {/if}
 
-  {#if !$authRequired && page !== 'onboarding' && page !== 'chat'}
+  {#if !focus && !$authRequired && page !== 'onboarding' && page !== 'chat'}
     <!-- Always-available quick question, as on the iPhone app. Not in Chat:
          the composer is the way to ask there, and the pill covered the
          message metadata on a phone. -->
     <AskGenie on:navigate={(e) => navigate(e.detail)} />
   {/if}
 
+  {#if !focus}
   <nav class="mobile-tabs" aria-label="Primary navigation">
     {#each mobilePrimaryPages as p}
       <button class:active={page === p.id} on:click={() => navigate(p.id)} aria-current={page === p.id ? 'page' : undefined}>
@@ -691,6 +852,7 @@
       <span aria-hidden="true">•••</span><small>More</small>
     </button>
   </nav>
+  {/if}
 </div>
 {/if}
 
@@ -1208,6 +1370,55 @@
   .launcher-group button > span:last-child { min-width: 0; display: grid; }
   .launcher-group strong { overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
   .launcher-group small { color: var(--sl-text-faint); font-size: .61rem; text-transform: capitalize; }
+
+  /* ── Chat-first shell ────────────────────────────────────────────── */
+  .layout.focus-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); }
+  .focus-top {
+    grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 1rem;
+    min-width: 0; padding: 0 1.2rem; background: var(--sl-bg); z-index: 40;
+  }
+  .focus-menu, .focus-round { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border-radius: 50%; color: var(--sl-text); background: transparent; }
+  .focus-menu:hover { background: var(--sl-surface-raised); }
+  .focus-round { border: 1px solid var(--sl-line); background: var(--sl-surface); }
+  .focus-round:hover { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 32%, var(--sl-line)); }
+  .focus-home { display: flex; align-items: center; gap: .5rem; padding: .25rem .5rem .25rem .25rem; border-radius: 12px; color: var(--sl-text); background: transparent; font-size: 1.45rem; font-weight: 760; letter-spacing: -.035em; line-height: 1; }
+  .focus-home:hover { background: var(--sl-surface-raised); }
+  .focus-actions { margin-left: auto; display: flex; align-items: center; gap: .7rem; }
+  .focus-avatar { width: 40px; height: 40px; color: var(--sl-accent-ink); background: var(--sl-accent-soft); font-size: .8rem; }
+  .focus-offline { color: var(--sl-text-faint); font-size: .72rem; font-weight: 600; }
+  .launcher-quick { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+  .launcher-quick button { padding: .42rem .8rem; border: 1px solid var(--sl-line); border-radius: 999px; color: var(--sl-text-dim); background: transparent; font-size: .74rem; font-weight: 600; }
+  .launcher-quick button:hover { color: var(--sl-accent-ink); border-color: color-mix(in srgb, var(--sl-accent) 32%, var(--sl-line)); }
+  .launcher-build { margin-left: auto; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .focus-stage { grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .focus-stage.has-panel { grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.15fr); }
+  .focus-stage.has-panel.wide { grid-template-columns: minmax(340px, 400px) minmax(0, 1fr); }
+  .focus-stage.solo { grid-template-columns: minmax(0, 1fr); }
+  .focus-stage.solo .focus-chat { display: none; }
+  .focus-chat { min-width: 0; min-height: 0; }
+  .focus-panel {
+    min-width: 0; min-height: 0; display: flex; flex-direction: column; margin: 0 .75rem .75rem 0;
+    border: 1px solid var(--sl-line); border-radius: 16px; background: var(--sl-surface); overflow: hidden;
+  }
+  .focus-stage.solo .focus-panel { margin-left: .75rem; }
+  .focus-panel-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .55rem .6rem .55rem 1rem; border-bottom: 1px solid var(--sl-line); }
+  .focus-panel-head strong { overflow: hidden; font-size: .86rem; text-overflow: ellipsis; white-space: nowrap; }
+  .focus-panel-head button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--sl-text-dim); background: transparent; font-size: 1.1rem; line-height: 1; }
+  .focus-panel-head button:hover { color: var(--sl-text); background: var(--sl-surface-raised); }
+  .focus-panel-body { flex: 1; background: var(--sl-surface); }
+  .app-launcher.centered { top: 72px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100vw - 2rem)); max-height: calc(100vh - 96px); }
+  .launcher-shell > span { margin-right: .3rem; color: var(--sl-text-faint); font-size: .64rem; font-weight: 650; text-transform: uppercase; letter-spacing: .09em; }
+  @media (max-width: 900px) {
+    /* No room for two columns: the summoned screen covers the conversation
+       and its close button brings the conversation back. */
+    .focus-stage.has-panel, .focus-stage.has-panel.wide { grid-template-columns: minmax(0, 1fr); }
+    .focus-stage.has-panel .focus-chat { display: none; }
+    .focus-panel { margin: 0; border-radius: 0; border-width: 1px 0 0; }
+    .focus-top { gap: .35rem; padding: 0 .6rem; }
+    .focus-home { font-size: 1.25rem; }
+  }
 
   /* ── Main content ────────────────────────────────────────────────── */
   .content { min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; background: var(--sl-bg); }

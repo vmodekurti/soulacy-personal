@@ -36,6 +36,10 @@ beforeEach(() => {
   localStorage.clear()
   // Skip the first-run redirect, which would otherwise decide the route for us.
   localStorage.setItem('soulacy-onboarding-seen', '1')
+  // These cases read the sidebar to learn which screen is showing, so they run
+  // in the full workspace. The chat-first shell's routing is covered in
+  // focusshell.routing.test.js.
+  localStorage.setItem('soulacy_shell_mode', 'workspace')
 })
 
 afterEach(() => {
