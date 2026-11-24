@@ -106,7 +106,7 @@ jobs:
   build-darwin:
     name: Build macOS (${{ matrix.arch }})
     needs: release-context
-    runs-on: macos-14      # Apple Silicon runner
+    runs-on: macos-15      # Apple Silicon runner (macos-14 was retired, #410)
     environment: release
     strategy:
       matrix:
