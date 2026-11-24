@@ -200,6 +200,12 @@ var routeSequence atomic.Uint64
 // provider availability failures. Each candidate is independently governed by
 // completeOne, so retries and fallbacks cannot escape accounting or budgets.
 func (r *Router) Complete(ctx context.Context, providerID string, req CompletionRequest) (result *CompletionResponse, resultErr error) {
+	// Private content is pinned to a local provider before anything else looks
+	// at the request, and never fails over to another one.
+	ctx, providerID, req, private, privacyErr := r.applyPrivacy(ctx, providerID, req)
+	if privacyErr != nil {
+		return nil, privacyErr
+	}
 	callID := fmt.Sprintf("llm-%d-%d", time.Now().UTC().UnixMilli(), routeSequence.Add(1))
 	started := time.Now()
 	r.emitCompletion(ctx, CompletionEvent{Kind: "prompt", ID: callID, RequestedProvider: providerID, RequestedModel: req.Model, Request: req})
@@ -211,6 +217,17 @@ func (r *Router) Complete(ctx context.Context, providerID string, req Completion
 	mode := normalizeRoutingMode(hint.Mode)
 	if mode == "" {
 		mode = policy.DefaultMode
+	}
+	if private {
+		resp, err := r.completeFixed(ctx, providerID, req, callID, hint)
+		if err != nil {
+			// Fail closed: say what happened rather than try another provider.
+			if strings.Contains(err.Error(), "exceeds the evidenced input budget") {
+				return nil, fmt.Errorf("this private conversation has grown too long for the model on your machine (%s), so it stopped here; nothing was sent elsewhere. Start a new conversation or ask for something shorter: %w", providerID, err)
+			}
+			return nil, fmt.Errorf("this conversation is private, so it stayed on this machine, but the local model (%s) did not answer; nothing was sent elsewhere: %w", providerID, err)
+		}
+		return resp, nil
 	}
 	if !policy.Enabled || mode == "pinned" || req.Operation == "embedding" {
 		return r.completeFixed(ctx, providerID, req, callID, hint)
